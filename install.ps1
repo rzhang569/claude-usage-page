@@ -20,8 +20,11 @@ foreach ($cand in "py -3", "python", "python3") {
   $name = $parts[0]
   $rest = @($parts | Select-Object -Skip 1)
   try {
-    $exe = (& $name @rest -c "import sys; print(sys.executable)" 2>$null | Select-Object -First 1)
-    if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe.Trim())) { $py = $exe.Trim(); break }
+    # Collect all output first: cutting the pipeline short (Select-Object -First) leaves
+    # $LASTEXITCODE at -1 in Windows PowerShell 5.1.
+    $out = @(& $name @rest -c "import sys; print(sys.executable)" 2>$null)
+    $exe = if ($out.Count) { "$($out[0])".Trim() } else { "" }
+    if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { $py = $exe; break }
   } catch {}
 }
 if (-not $py) { throw "Python 3 not found. Install it from python.org, then run this again." }
