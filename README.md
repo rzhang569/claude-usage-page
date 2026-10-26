@@ -25,9 +25,11 @@ Everything is read locally and nothing leaves your computer.
 
 Totals land within a few percent of `claude /stats`. Two known differences: `stats-cache.json` splits days in UTC, so those older days change at UTC midnight while newer days use your local time; and older days only kept per-model totals, so their input / output / cache split is estimated from each model's overall mix (marked with ≈).
 
-## Install (macOS)
+## Install
 
 Needs Python 3 and Claude Code.
+
+### macOS
 
 ```bash
 git clone https://github.com/rzhang569/claude-usage-page.git
@@ -39,17 +41,29 @@ Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code (in a new
 
 The installer copies the scripts to `~/.claude-usage-page/`, adds two launchd jobs (rebuild every hour; serve the page on 127.0.0.1 only, which serves the page and nothing else) and writes the skill to `~/.claude/skills/my-usage/`. Run it again after pulling to update.
 
-### Uninstall
+Uninstall with `./uninstall.sh`: it removes the launchd jobs, `~/.claude-usage-page/` and the skill.
 
-```bash
-./uninstall.sh
+### Windows
+
+Install Python 3 from [python.org](https://www.python.org/downloads/) first (the Microsoft Store stub won't do). Then, in PowerShell:
+
+```powershell
+git clone https://github.com/rzhang569/claude-usage-page.git
+cd claude-usage-page
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-That removes the launchd jobs, `~/.claude-usage-page/` and the skill. Claude Code's own files are never touched.
+Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code (in a new session). Use another port with `-Port 8790`. No admin rights needed.
+
+The installer copies the scripts to `%USERPROFILE%\.claude-usage-page\`, adds two Task Scheduler tasks (`claude-usage-page-build` every hour, `claude-usage-page-serve` at sign-in; both run without a console window) and writes the skill to `%USERPROFILE%\.claude\skills\my-usage\`. Run it again after pulling to update.
+
+Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it removes both tasks, `%USERPROFILE%\.claude-usage-page\` and the skill.
+
+Claude Code's own files are never touched on either system.
 
 ### Other systems
 
-`build.py` and `serve.py` are plain Python with no dependencies. Run `python3 build.py` on a timer (cron, Task Scheduler) and `python3 serve.py` at login, or just open the generated `index.html` in a browser. Set `CLAUDE_CONFIG_DIR` if your Claude Code data isn't in `~/.claude`.
+`build.py` and `serve.py` are plain Python with no dependencies. Run `python3 build.py` on a timer (cron, a systemd timer) and `python3 serve.py` at login, or just open the generated `index.html` in a browser. Set `CLAUDE_CONFIG_DIR` if your Claude Code data isn't in `~/.claude`.
 
 ## License
 

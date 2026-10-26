@@ -12,6 +12,7 @@ import datetime as dt
 import glob
 import json
 import os
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASE = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
@@ -77,6 +78,18 @@ def load_json(path, default):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+def replace(src, dst):
+    # On Windows the target can't be replaced while serve.py has it open; retry briefly.
+    for attempt in range(20):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.1)
 
 
 def main():
@@ -185,14 +198,14 @@ def main():
     tmp = CACHE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cache, f, separators=(",", ":"))
-    os.replace(tmp, CACHE)
+    replace(tmp, CACHE)
 
     with open(TEMPLATE, encoding="utf-8") as f:
         html = f.read().replace("/*__DATA__*/null", json.dumps(data, separators=(",", ":")))
     tmp = OUT + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(html)
-    os.replace(tmp, OUT)
+    replace(tmp, OUT)
     print(f"wrote {OUT}: {len(days)} days")
 
 
