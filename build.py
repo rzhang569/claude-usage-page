@@ -103,7 +103,7 @@ def main():
             st = os.stat(path)
         except OSError:
             continue
-        stamp = [st.st_size, int(st.st_mtime)]
+        stamp = [st.st_size, st.st_mtime_ns]
         held = files.get(path)
         if held and held.get("stamp") == stamp:
             continue
@@ -111,7 +111,12 @@ def main():
 
     replies, rows, spans = {}, {}, {}
     for entry in files.values():
-        replies.update(entry["r"])
+        for key, reply in entry["r"].items():
+            held = replies.get(key)
+            if held:
+                held[4:] = [max(a, b) for a, b in zip(held[4:], reply[4:])]
+            else:
+                replies[key] = reply[:]
         rows.update(entry["w"])
         for sid, (lo, hi) in entry["s"].items():
             a, b = spans.get(sid, (lo, hi))
@@ -153,7 +158,7 @@ def main():
 
     # Everything after it, from transcripts.
     for t, session, side, model, i, o, cw, cr in replies.values():
-        if t <= cutoff:
+        if t < cutoff:
             continue
         d = day(local_day(t))
         counts = (i, o, cw, cr)
@@ -164,11 +169,11 @@ def main():
         for n, v in enumerate(counts):
             acc[n] += v
     for t, session, side in rows.values():
-        if t > cutoff:
+        if t >= cutoff:
             day(local_day(t))["m"] += 1
             totals["messages"] += 1
     for sid, (lo, hi) in spans.items():
-        if lo > cutoff:
+        if lo >= cutoff:
             day(local_day(lo))["sc"] += 1
             totals["sessions"] += 1
         totals["longest"] = max(totals["longest"], hi - lo)

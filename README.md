@@ -67,6 +67,16 @@ Claude Code's own files are never touched on either system.
 
 `build.py` and `serve.py` are plain Python with no dependencies. Run `python3 build.py` on a timer (cron, a systemd timer) and `python3 serve.py` at login, or just open the generated `index.html` in a browser. Set `CLAUDE_CONFIG_DIR` if your Claude Code data isn't in `~/.claude`.
 
+## Tests
+
+Run the standard-library-only test suite from the repository root:
+
+```bash
+python3 -m unittest -v
+```
+
+Tests generate fake Claude data and application copies in temporary directories, set `CLAUDE_CONFIG_DIR` there, and start server subprocesses on free localhost ports. They do not use or modify your real Claude data or installed usage page.
+
 ## License
 
 MIT

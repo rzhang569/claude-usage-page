@@ -2,3 +2,4 @@ index.html
 cache.json
 *.log
 .DS_Store
+__pycache__/
