@@ -72,4 +72,5 @@ Then say in one line that the card is open and when it was updated. Do not resta
 If build.py fails, show the last lines of its output and of $DEST/$BUILD.log, and stop.
 SKILL
 
-echo "Installed. Open http://127.0.0.1:$PORT/ or type /my-usage in Claude Code."
+echo "Installed. Open http://127.0.0.1:$PORT/ or type /my-usage in a new Claude Code session"
+echo "(sessions that were already open won't list it)."

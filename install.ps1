@@ -76,4 +76,5 @@ If build.py fails, show the last lines of its output and stop.
 # UTF-8 without a byte-order mark, so the skill's front matter parses.
 [IO.File]::WriteAllText((Join-Path $skill "SKILL.md"), $skillText, (New-Object Text.UTF8Encoding $false))
 
-Write-Host "Installed. Open http://127.0.0.1:$Port/ or type /my-usage in Claude Code."
+Write-Host "Installed. Open http://127.0.0.1:$Port/ or type /my-usage in a new Claude Code session"
+Write-Host "(sessions that were already open won't list it)."

@@ -37,7 +37,7 @@ cd claude-usage-page
 ./install.sh
 ```
 
-Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code (in a new session). Use another port with `PORT=8790 ./install.sh`.
+Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code. Use another port with `PORT=8790 ./install.sh`.
 
 The installer copies the scripts to `~/.claude-usage-page/`, adds two launchd jobs (rebuild every hour; serve the page on 127.0.0.1 only, which serves the page and nothing else) and writes the skill to `~/.claude/skills/my-usage/`. Run it again after pulling to update.
 
@@ -53,13 +53,15 @@ cd claude-usage-page
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code (in a new session). Use another port with `-Port 8790`. No admin rights needed.
+Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code. Use another port with `-Port 8790`. No admin rights needed.
 
 The installer copies the scripts to `%USERPROFILE%\.claude-usage-page\`, adds two Task Scheduler tasks (`claude-usage-page-build` every hour, `claude-usage-page-serve` at sign-in; both run without a console window) and writes the skill to `%USERPROFILE%\.claude\skills\my-usage\`. Run it again after pulling to update.
 
 Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it removes both tasks, `%USERPROFILE%\.claude-usage-page\` and the skill.
 
 Claude Code's own files are never touched on either system.
+
+`/my-usage` shows up only in sessions started after the install: Claude Code reads its skill list when a session starts, so sessions that were already open won't list it. Start a new session to use it.
 
 ### Other systems
 
