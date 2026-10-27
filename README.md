@@ -15,6 +15,8 @@ Unofficial; not affiliated with Anthropic.
 - **Models**: tokens per day stacked by model, and a table with each model's share and token types.
 - All / 30d / 7d ranges. Hover anything for exact values.
 
+Reloading the page always shows the latest numbers: when the page is more than a minute old, the server rebuilds it before answering (well under a second once the parse cache is warm). The page also reloads itself every 10 minutes, and a background job rebuilds it every hour.
+
 ## Where the numbers come from
 
 Everything is read locally and nothing leaves your computer.

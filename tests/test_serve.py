@@ -7,12 +7,17 @@ import subprocess
 import sys
 import tempfile
 import time
+import os
 import unittest
 
+from tests import fixtures
 from tests.fixtures import Fixture
 
 
 class ServerTests(unittest.TestCase):
+    # These tests serve a hand-written page, so rebuilding on load stays off.
+    rebuild_after = "-1"
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="claude-usage-server-test-")
         self.addCleanup(self.temp.cleanup)
@@ -46,7 +51,8 @@ class ServerTests(unittest.TestCase):
                 self.port = listener.getsockname()[1]
             log = self.resources.enter_context(tempfile.TemporaryFile(mode="w+b"))
             process = subprocess.Popen([sys.executable, str(self.fixture.app / "serve.py"), str(self.port)],
-                                       cwd=self.fixture.root, env=self.fixture.env(),
+                                       cwd=self.fixture.root,
+                                       env={**self.fixture.env(), "CLAUDE_USAGE_REBUILD_AFTER": self.rebuild_after},
                                        stdout=subprocess.DEVNULL, stderr=log)
             self.addCleanup(self.stop_server, process)
             deadline = time.monotonic() + 10
@@ -147,3 +153,66 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(headers["Cache-Control"], "no-store")
             self.assertEqual(body, self.body)
         self.assertIsNone(self.process.poll())
+
+
+class RebuildOnLoadTests(ServerTests):
+    """A request rebuilds a stale page from the fake Claude data before serving it."""
+    rebuild_after = "60"
+
+    def make_stale(self):
+        old = time.time() - 3600
+        os.utime(self.page, (old, old))
+
+    def test_stale_page_is_rebuilt_before_it_is_served(self):
+        self.make_stale()
+        status, headers, body = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn(b"const DATA = {", body)
+        self.assertNotEqual(body, self.body)
+        self.assertEqual(body, self.page.read_bytes())
+        self.assertEqual(headers["Cache-Control"], "no-store")
+
+    def test_fresh_page_is_served_without_rebuilding(self):
+        for path in ("/", "/index.html"):
+            with self.subTest(path=path):
+                self.assertEqual(self.request(path)[2], self.body)
+
+    def test_new_transcript_shows_up_on_the_next_load(self):
+        self.make_stale()
+        before = self.request("/")[2]
+        self.fixture.write_transcript("delta/later.jsonl", [
+            fixtures.row("later-user", "2026-01-04T12:00:00Z", "later"),
+            fixtures.row("later-answer", "2026-01-04T12:05:00Z", "later", "assistant",
+                         counts=(7, 7, 7, 7)),
+        ])
+        self.make_stale()
+        after = self.request("/")[2]
+        self.assertNotIn(b'"2026-01-04"', before)
+        self.assertIn(b'"2026-01-04"', after)
+
+    def test_missing_page_is_built_on_first_request(self):
+        self.page.unlink()
+        status, _, body = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn(b"const DATA = {", body)
+
+    def test_failed_build_keeps_serving_the_last_page(self):
+        (self.fixture.app / "template.html").unlink()
+        self.make_stale()
+        status, _, body = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, self.body)
+
+    def test_parallel_requests_on_a_stale_page_all_get_the_same_rebuilt_page(self):
+        self.make_stale()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            responses = list(pool.map(self.request, ["/"] * 12))
+        bodies = {body for status, _, body in responses if status == 200}
+        self.assertEqual(len(responses), 12)
+        self.assertEqual(len(bodies), 1)
+        self.assertIn(b"const DATA = {", bodies.pop())
+
+    # The inherited cases below assume the hand-written page is served untouched
+    # or that a missing page stays missing; they don't apply once rebuilding is on.
+    test_missing_index_returns_503_and_recovers_without_restart = None
+    test_build_subprocess_output_is_served_without_server_restart = None
