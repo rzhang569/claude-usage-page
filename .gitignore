@@ -3,3 +3,4 @@ cache.json
 *.log
 .DS_Store
 __pycache__/
+!docs/index.html
