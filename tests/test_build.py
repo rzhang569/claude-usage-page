@@ -137,7 +137,8 @@ class ParsingTests(BuildCase):
         ])
         with path.open("ab") as stream:
             stream.write(b'not JSON\n{"timestamp": bad}\n\xff\xfe\n')
-        self.assertEqual(self.build.parse(path), {"r": {}, "w": {}, "s": {}})
+        parsed = self.build.parse(path)
+        self.assertEqual((parsed["r"], parsed["w"], parsed["s"]), ({}, {}, {}))
 
     def test_unsorted_rows_use_minimum_and_maximum_session_timestamps(self):
         path = self.only([row("late", "2026-01-03T04:00:00Z"),
@@ -335,6 +336,57 @@ class CacheTests(BuildCase):
         self.assertEqual({call.args[0] for call in parse.call_args_list}, {str(self.fixture.recent), str(added)})
         self.assertEqual(data["totals"]["messages"], 112)
 
+    def write_rows(self, path, rows, mode="a"):
+        with Path(path).open(mode, encoding="utf-8") as stream:
+            stream.write("".join(json.dumps(item) + "\n" for item in rows))
+
+    def test_grown_transcript_is_read_from_where_it_stopped(self):
+        path = self.fixture.write_transcript("grow/a.jsonl", [row("one", "2026-01-03T01:00:00Z", "grow")])
+        held = self.build.parse(str(path))
+        held["w"]["sentinel"] = [0, "kept", 0]  # Lost if the file were read from the start.
+        self.write_rows(path, [row("two", "2026-01-03T02:00:00Z", "grow")])
+        parsed = self.build.parse(str(path), held)
+        self.assertEqual(set(parsed["w"]), {"one", "two", "sentinel"})
+        self.assertEqual(parsed["offset"], path.stat().st_size)
+        self.assertEqual(parsed["s"]["grow"][1] - parsed["s"]["grow"][0], 3600)
+
+    def test_grown_reply_keeps_the_largest_counts_across_reads(self):
+        path = self.fixture.write_transcript("grow/b.jsonl", [
+            row("one", "2026-01-03T01:00:00Z", "grow", "assistant", counts=(1, 9, 1, 1),
+                message_id="m", request_id="r")])
+        held = self.build.parse(str(path))
+        self.write_rows(path, [row("two", "2026-01-03T01:00:01Z", "grow", "assistant", counts=(5, 2, 5, 5),
+                                   message_id="m", request_id="r")])
+        self.assertEqual(self.build.parse(str(path), held)["r"]["m|r"][4:], [5, 9, 5, 5])
+
+    def test_unfinished_last_line_is_read_again_once_complete(self):
+        path = self.fixture.write_transcript("grow/c.jsonl", [row("one", "2026-01-03T01:00:00Z", "grow")])
+        whole = json.dumps(row("two", "2026-01-03T02:00:00Z", "grow"))
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(whole[:20])
+        held = self.build.parse(str(path))
+        self.assertEqual(set(held["w"]), {"one"})
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(whole[20:] + "\n")
+        self.assertEqual(set(self.build.parse(str(path), held)["w"]), {"one", "two"})
+
+    def test_rewritten_transcript_is_read_again_from_the_start(self):
+        path = self.fixture.write_transcript("grow/d.jsonl", [row("one", "2026-01-03T01:00:00Z", "grow")])
+        held = self.build.parse(str(path))
+        self.write_rows(path, [row("new", "2026-01-03T02:00:00Z", "other"),
+                               row("more", "2026-01-03T03:00:00Z", "other")], mode="w")
+        self.assertEqual(set(self.build.parse(str(path), held)["w"]), {"new", "more"})
+
+    def test_appending_through_main_matches_a_full_rebuild(self):
+        self.run_build()
+        self.write_rows(self.fixture.recent, [row("late", "2026-01-03T04:00:00Z")])
+        self.run_build()
+        incremental = json.loads(Path(self.build.CACHE).read_text(encoding="utf-8"))["files"]
+        Path(self.build.CACHE).unlink()
+        self.run_build()
+        full = json.loads(Path(self.build.CACHE).read_text(encoding="utf-8"))["files"]
+        self.assertEqual(incremental, full)
+
     def test_same_size_edit_within_one_second_invalidates_parse_cache(self):
         path = self.only([row("a", "2026-01-03T01:00:00Z", kind="assistant", counts=(1, 0, 0, 0))])
         base_ns = 1767402000 * 1_000_000_000
@@ -348,7 +400,7 @@ class CacheTests(BuildCase):
         self.assertNotEqual(previous.st_mtime_ns, path.stat().st_mtime_ns)
         with mock.patch.object(self.build, "parse", wraps=self.build.parse) as parse:
             data = self.run_build()
-        parse.assert_called_once_with(str(path))
+        parse.assert_called_once_with(str(path), None)
         self.assertEqual(data["models"][MODEL][0], 109)
 
     def test_deleted_transcripts_still_count_on_later_builds(self):

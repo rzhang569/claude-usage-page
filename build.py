@@ -22,6 +22,7 @@ CACHE = os.path.join(HERE, "cache.json")
 OUT = os.path.join(HERE, "index.html")
 TEMPLATE = os.path.join(HERE, "template.html")
 CACHE_VERSION = 3
+TAIL = 256  # bytes kept to check that a transcript was appended to, not rewritten
 
 
 def epoch(ts):
@@ -33,15 +34,33 @@ def local_day(t):
     return dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d")
 
 
-def parse(path):
-    """replies: one per API response; rows: user/assistant rows by uuid; spans: session first/last."""
-    replies, rows, spans = {}, {}, {}
-    with open(path, encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            if '"timestamp"' not in line:
+def resume_point(f, held):
+    """Where a grown transcript can be picked up, or 0 if its known bytes are not still there."""
+    offset = (held or {}).get("offset", 0)
+    tail = bytes.fromhex((held or {}).get("tail", ""))
+    if not offset or offset < len(tail):
+        return 0
+    f.seek(offset - len(tail))
+    return offset if f.read(len(tail)) == tail else 0
+
+
+def parse(path, held=None):
+    """replies: one per API response; rows: user/assistant rows by uuid; spans: session first/last.
+
+    Transcripts only grow and can reach hundreds of MB, so with a held entry for a grown
+    file only the new bytes are read. A last line without its newline is read again next time.
+    """
+    with open(path, "rb") as f:
+        offset = resume_point(f, held)
+        replies, rows, spans = (held["r"], held["w"], held["s"]) if offset else ({}, {}, {})
+        f.seek(offset)
+        for raw in f:
+            if raw.endswith(b"\n"):
+                offset += len(raw)
+            if b'"timestamp"' not in raw:
                 continue
             try:
-                row = json.loads(line)
+                row = json.loads(raw.decode("utf-8", "ignore"))
             except ValueError:
                 continue
             ts, kind, session = row.get("timestamp"), row.get("type"), row.get("sessionId")
@@ -69,7 +88,10 @@ def parse(path):
                     held[4:] = [max(a, b) for a, b in zip(held[4:], counts)]
                 else:
                     replies[key] = [t, session, side, model, *counts]
-    return {"r": replies, "w": rows, "s": {k: list(v) for k, v in spans.items()}}
+        f.seek(max(0, offset - TAIL))
+        tail = f.read(offset - f.tell()).hex()
+    return {"r": replies, "w": rows, "s": {k: list(v) for k, v in spans.items()},
+            "offset": offset, "tail": tail}
 
 
 def load_json(path, default):
@@ -107,7 +129,8 @@ def main():
         held = files.get(path)
         if held and held.get("stamp") == stamp:
             continue
-        files[path] = {"stamp": stamp, **parse(path)}
+        grew = held and held["stamp"][0] < st.st_size
+        files[path] = {"stamp": stamp, **parse(path, held if grew else None)}
 
     replies, rows, spans = {}, {}, {}
     for entry in files.values():

@@ -48,7 +48,16 @@ plist() { # label, interval-or-keepalive, script args...
     echo '</dict></plist>'
   } > "$AGENTS/$label.plist"
   launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$AGENTS/$label.plist"
+  # bootout returns before a running job has stopped, so bootstrap can fail at first.
+  tries=0
+  until launchctl bootstrap "gui/$(id -u)" "$AGENTS/$label.plist" 2>/dev/null; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 10 ]; then
+      echo "Could not start $label"
+      exit 1
+    fi
+    sleep 1
+  done
 }
 
 "$PY" "$DEST/build.py"

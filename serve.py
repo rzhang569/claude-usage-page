@@ -65,4 +65,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+class Server(http.server.ThreadingHTTPServer):
+    request_queue_size = 64  # The default of 5 resets connections when many tabs reload at once.
+
+
+Server(("127.0.0.1", PORT), Handler).serve_forever()
