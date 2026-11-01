@@ -17,7 +17,7 @@ Unofficial; not affiliated with Anthropic.
 - **Models**: tokens per day stacked by model, and a table with each model's share and token types.
 - All / 30d / 7d ranges. Hover anything for exact values.
 
-Reloading the page always shows the latest numbers: when the page is more than a minute old, the server rebuilds it before answering, which takes a few seconds. Only the new part of each transcript is read, so long sessions stay fast. The page also reloads itself every 10 minutes, and a background job rebuilds it every hour.
+Reloading the page always shows the latest numbers: when the page is more than a minute old, the server rebuilds it before answering, which usually takes about a second. Only the new part of each transcript is read, so long sessions stay fast. The page also reloads itself every 10 minutes, and a background job rebuilds it every hour.
 
 ## Where the numbers come from
 
@@ -65,7 +65,7 @@ Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it remo
 
 Claude Code's own files are never touched on either system.
 
-`/my-usage` shows up only in sessions started after the install: Claude Code reads its skill list when a session starts, so sessions that were already open won't list it. Start a new session to use it.
+`/my-usage` shows up only in sessions started after the install: Claude Code reads its skill list when a session starts, so sessions that were already open won't list it. Start a new session, or restart Claude to make it appear in existing ones.
 
 ### Other systems
 

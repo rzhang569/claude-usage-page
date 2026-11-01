@@ -38,11 +38,13 @@ plist() { # label, interval-or-keepalive, script args...
     echo '  <key>RunAtLoad</key><true/>'
     if [ "$mode" = keepalive ]; then
       echo '  <key>KeepAlive</key><true/>'
+      # Without this, launchd throttles the job and a reload crawls on a busy computer.
+      echo '  <key>ProcessType</key><string>Interactive</string>'
     else
       echo "  <key>StartInterval</key><integer>$mode</integer>"
       echo '  <key>LowPriorityIO</key><true/>'
+      echo '  <key>Nice</key><integer>10</integer>'
     fi
-    echo '  <key>Nice</key><integer>10</integer>'
     echo "  <key>StandardOutPath</key><string>$DEST/$label.log</string>"
     echo "  <key>StandardErrorPath</key><string>$DEST/$label.log</string>"
     echo '</dict></plist>'
