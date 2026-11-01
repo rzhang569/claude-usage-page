@@ -17,7 +17,14 @@ Unofficial; not affiliated with Anthropic.
 - **Models**: tokens per day stacked by model, and a table with each model's share and token types.
 - All / 30d / 7d ranges. Hover anything for exact values.
 
-Reloading the page always shows the latest numbers: when the page is more than a minute old, the server rebuilds it before answering, which usually takes about a second. Only the new part of each transcript is read, so long sessions stay fast. The page also reloads itself every 10 minutes, and a background job rebuilds it every hour.
+When the numbers update:
+
+- **`/my-usage`** always rebuilds first, then opens the page, so you see the latest numbers right away.
+- **Opening or reloading the page yourself** rebuilds it if the last build is over a minute old, which usually takes about a second. Within that minute you see the last build.
+- **A page left open** reloads itself every 10 minutes, following the same one-minute rule.
+- **With no page open**, a background job rebuilds every hour.
+
+Only the new part of each transcript is read, so long sessions stay fast.
 
 ## Where the numbers come from
 
