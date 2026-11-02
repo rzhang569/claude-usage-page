@@ -1,5 +1,7 @@
 # claude-usage-page
 
+[![Tests](https://github.com/rzhang569/claude-usage-page/actions/workflows/test.yml/badge.svg)](https://github.com/rzhang569/claude-usage-page/actions/workflows/test.yml)
+
 The Claude desktop app used to show a usage card on the Code tab's new-session screen: sessions, messages, tokens, a day heatmap and a per-model breakdown. It was removed in Desktop v2.42304.0 (October 2026; see [anthropics/claude-code#102264](https://github.com/anthropics/claude-code/issues/102264)). This brings the card back as a small local web page, kept up to date in the background, with a `/my-usage` command in Claude Code to open it. It can show your local Codex usage the same way.
 
 **[Try the live demo](https://rzhang569.github.io/claude-usage-page/)** (made-up data). Works on macOS and Windows.
