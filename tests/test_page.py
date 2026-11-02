@@ -92,6 +92,12 @@ class PageTests(unittest.TestCase):
         self.assertNotIn("Haiku", result["elements"]["mtable"]["html"])
         self.assertEqual(self.tips(result, "chart"), ["Jan 1\nOpus 5.5: 3.0k\nSonnet 5.5: 2.0k"])
 
+    def test_model_colors_follow_the_theme(self):
+        result = self.page(clicks=[("tabs", {"tab": "models"}), ("themes", {"theme": "blue"})])
+        self.assertIn("#2566d0", result["elements"]["mtable"]["html"])
+        self.assertEqual(result["classes"], ["blue"])
+        self.assertEqual(result["storage"]["cu.theme"], "blue")
+
     def test_profile_follows_the_system_language(self):
         chinese = self.page(data(models={OPUS: [2480000000, 0, 0, 0]},
                                  days={"2026-01-01": {"m": 1, "tm": {OPUS: 2480000000}, "sp": None, "sc": 1}}),
@@ -101,6 +107,12 @@ class PageTests(unittest.TestCase):
         english = self.page(language="fr-FR", clicks=[("styles", {"style": "profile"})])
         self.assertEqual(self.stats(english)[3], ("3 days", "Longest streak"))
         self.assertIn("Updated", english["elements"]["pfoot"]["text"])
+
+    def test_profile_hides_the_theme_switch_and_ignores_the_theme(self):
+        result = self.page(storage={"cu.theme": "blue", "cu.style": "profile"})
+        self.assertEqual(result["classes"], ["profile"])
+        self.assertTrue(result["elements"]["themes"]["hidden"])
+        self.assertFalse(result["elements"]["profile"]["hidden"])
 
     def test_profile_daily_tips_stop_today(self):
         self.assertEqual(self.tips(self.page(storage={"cu.style": "profile"}), "year")[-1], "Jan 1: 3.0k tokens")
