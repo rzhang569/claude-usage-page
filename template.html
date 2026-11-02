@@ -68,8 +68,14 @@
   .switches { display: flex; flex-wrap: wrap; gap: 8px; }
   html.blue { --ground: #fcfcfb; --card: #f0f0ef; --tile: #d9d9d8; --line: #e2e2e0; --ink: #1f1f1e; --muted: #7c7c79;
     --accent: #2566d0; --tip: #1f1f1e; --h0: #d9d9d8; --h1: #86acea; --h2: #6394e3; --h3: #407cdd; --h4: #2566d0; }
+  html.dark { color-scheme: dark; --ground: #1f1b16; --card: #2a241d; --tile: #352e25; --line: #453c31; --ink: #f3ece1; --muted: #a99c8b;
+    --accent: #e8875a; --tip: #4a4036; --h0: #3a3229; --h1: #6b3a22; --h2: #9c5230; --h3: #cf7347; --h4: #f0a274; }
+  html.blue.dark { --ground: #1c1c1b; --card: #262625; --tile: #333332; --line: #3d3d3b; --ink: #f2f2f0; --muted: #a0a09c;
+    --accent: #5a90e6; --tip: #454543; --h0: #333332; --h1: #1f4a96; --h2: #2f6bd1; --h3: #5a90e6; --h4: #8fb6f0; }
   html.profile { --ground: #171717; --card: #2b2b2b; --tile: #2b2b2b; --line: #333; --ink: #f4f4f4; --muted: #8f8f8f;
-    --tip: #3a3a3a; --h0: #2f2f2f; --h1: #16356b; --h2: #1f4f9c; --h3: #3b82f6; --h4: #7cb4f7; }
+    --tip: #3a3a3a; --h0: #2f2f2f; --h1: #16356b; --h2: #1f4f9c; --h3: #3b82f6; --h4: #7cb4f7; color-scheme: dark; }
+  html.profile.light { --ground: #fff; --card: #fff; --tile: #f0f0f0; --line: #e5e5e5; --ink: #171717; --muted: #6e6e6e;
+    --tip: #171717; --h0: #ececec; --h1: #bcd5fb; --h2: #7cb4f7; --h3: #3b82f6; --h4: #1f4f9c; color-scheme: light; }
   #profile { padding-top: 12px; }
   .who { text-align: center; }
   .avatar { width: 112px; height: 112px; margin: 0 auto 16px; border-radius: 50%; background: #98a6a6; color: #fff;
@@ -108,6 +114,7 @@
         <button data-source="claude">Claude Code</button>
         <button data-source="codex">Codex</button>
       </div>
+      <div class="seg"><button id="appearance" aria-pressed="true"></button></div>
       <div class="seg" id="themes">
         <button data-theme="orange">Orange</button>
         <button data-theme="blue">Blue</button>
@@ -193,7 +200,10 @@ const LUCK = Math.random();
 const PALETTES = {
   orange: ["#d97757", "#7a3a1e", "#e3b05a", "#8a6d3b", "#5f86c9", "#a86fc4", "#6b8a3a", "#9a8f7a"],
   blue: ["#2566d0", "#6394e3", "#86acea", "#1b4a96", "#a9c4f0", "#407cdd", "#c6d8f5", "#7c7c79"],
+  orangeDark: ["#e8875a", "#f2c14e", "#b5764a", "#d9c2a0", "#7da7e0", "#c08fd6", "#9bbb5e", "#a99c8b"],
+  blueDark: ["#5a90e6", "#9cc0f5", "#2f6bd1", "#c6d8f5", "#3e5f9c", "#7f9fd6", "#e0e0dc", "#a0a09c"],
 };
+const LOOKS = { auto: "◐ Auto", light: "☀︎ Light", dark: "☾ Dark" };
 
 const pick = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const keep = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
@@ -201,10 +211,14 @@ let tab = pick("cu.tab", "overview");
 let range = pick("cu.range", "all");
 let style = pick("cu.style", "card");
 let theme = pick("cu.theme", "orange");
+let appearance = pick("cu.appearance", "auto");
 let mode = pick("cu.mode", "daily");
 let source = new URLSearchParams(location.search).get("source") || pick("cu.source", "claude");
 if (!SOURCES[source]) source = SOURCES.claude ? "claude" : "codex";
 let DATA;
+
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+const isDark = () => appearance === "dark" || appearance === "auto" && systemDark.matches;
 
 const fmt = n => {
   const units = [[1e9, "B"], [1e6, "m"], [1e3, "k"]];
@@ -365,7 +379,7 @@ function drawModels(s) {
   // Models under 0.05% of the range are noise: leftovers from a retry or a one-off test.
   const names = Object.keys(s.models).filter(n => sum(s.models[n]) >= s.total * 0.0005)
     .sort((a, b) => sum(s.models[b]) - sum(s.models[a]));
-  const palette = PALETTES[theme];
+  const palette = PALETTES[theme + (isDark() ? "Dark" : "")];
   const color = Object.fromEntries(RANKED.map((n, i) => [n, palette[i % palette.length]]));
   document.getElementById("keys").innerHTML = names.map(n => `<span style="--c:${color[n]}">${n}</span>`).join("");
 
@@ -512,6 +526,9 @@ function draw() {
   document.querySelectorAll("#sources button").forEach(b => b.setAttribute("aria-pressed", b.dataset.source === source));
   document.documentElement.classList.toggle("profile", isProfile);
   document.documentElement.classList.toggle("blue", theme === "blue" && !isProfile);
+  document.documentElement.classList.toggle("dark", isDark() && !isProfile);
+  document.getElementById("appearance").textContent = LOOKS[appearance];
+  document.documentElement.classList.toggle("light", !isDark() && isProfile);
   document.getElementById("themes").hidden = isProfile;
   document.querySelectorAll("#themes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.theme === theme));
   document.getElementById("profile").hidden = !isProfile;
@@ -541,6 +558,13 @@ function draw() {
     const b = e.target.closest("button"); if (!b) return;
     set(b.dataset[key]); keep("cu." + key, b.dataset[key]); draw();
   }));
+document.getElementById("appearance").addEventListener("click", () => {
+  const order = Object.keys(LOOKS);
+  appearance = order[(order.indexOf(appearance) + 1) % order.length];
+  keep("cu.appearance", appearance);
+  draw();
+});
+systemDark.addEventListener("change", draw);
 // Our own tooltip: shows at once, unlike the browser's built-in one.
 const tip = document.getElementById("tip");
 document.addEventListener("mousemove", e => {

@@ -21,7 +21,7 @@ Unofficial; not affiliated with Anthropic or OpenAI.
 - **Classic and Profile**: the card above, or a profile page with five totals and a year of daily, weekly or cumulative tokens. Profile follows your browser's language.
 - All / 30d / 7d ranges. Hover anything for exact values. Streaks and the heatmap always cover your whole history.
 - **Longest task** runs from a message you send to the end of the reply. A gap over 30 minutes ends it, so a sleeping computer doesn't count.
-- Pick an orange or a blue color theme (Classic only).
+- Pick auto, light or dark appearance, where auto follows your computer, and an orange or a blue color theme for Classic.
 
 When the numbers update:
 

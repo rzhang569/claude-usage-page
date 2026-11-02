@@ -1,5 +1,5 @@
 // Runs the page's script against a small stand-in for the browser and prints what it drew.
-// Input on stdin: {html, language, storage, search, luck, clicks: [[elementId, dataset], ...]}.
+// Input on stdin: {html, language, storage, search, luck, systemDark, clicks: [[elementId, dataset], ...]}.
 const vm = require("vm");
 
 const input = JSON.parse(require("fs").readFileSync(0, "utf8"));
@@ -43,6 +43,7 @@ const sandbox = {
   location: { search: input.search || "", pathname: "/" },
   history: { replaceState: (state, title, url) => { addressBar.push(url); } },
   URLSearchParams,
+  matchMedia: () => ({ matches: !!input.systemDark, addEventListener() {} }),
   addEventListener() {},
   setTimeout,
   clearTimeout,

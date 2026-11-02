@@ -41,12 +41,12 @@ CODEX = {
 
 @unittest.skipUnless(shutil.which("node"), "needs Node to run the page's script")
 class PageTests(unittest.TestCase):
-    def page(self, payload=None, language="en-US", storage=None, search="", clicks=()):
+    def page(self, payload=None, language="en-US", storage=None, search="", clicks=(), system_dark=False):
         template = (ROOT / "template.html").read_text(encoding="utf-8")
         page = template.replace("/*__DATA__*/null", json.dumps(payload or data()))
         run = subprocess.run(["node", str(HARNESS)], capture_output=True, text=True, timeout=30, encoding="utf-8",
                              input=json.dumps({"html": page, "language": language, "storage": storage,
-                                               "search": search, "clicks": list(clicks)}))
+                                               "search": search, "clicks": list(clicks), "systemDark": system_dark}))
         self.assertEqual(run.returncode, 0, run.stderr)
         return json.loads(run.stdout)
 
@@ -112,6 +112,31 @@ class PageTests(unittest.TestCase):
         self.assertEqual(result["classes"], ["blue"])
         self.assertEqual(result["storage"]["cu.theme"], "blue")
 
+    def test_appearance_follows_the_computer_by_default(self):
+        self.assertEqual(self.page()["classes"], [])
+        self.assertEqual(self.page(system_dark=True)["classes"], ["dark"])
+
+    def test_the_button_cycles_auto_light_and_dark_and_is_remembered(self):
+        result = self.page(system_dark=True, clicks=[("appearance", {})])
+        self.assertEqual((result["classes"], result["elements"]["appearance"]["text"]), ([], "☀︎ Light"))
+        self.assertEqual(result["storage"]["cu.appearance"], "light")
+        result = self.page(clicks=[("appearance", {}), ("appearance", {})])
+        self.assertEqual((result["classes"], result["elements"]["appearance"]["text"]), (["dark"], "☾ Dark"))
+        result = self.page(storage={"cu.appearance": "dark"}, clicks=[("appearance", {})])
+        self.assertEqual(result["elements"]["appearance"]["text"], "◐ Auto")
+
+    def test_model_colors_change_in_the_dark(self):
+        html = self.page(storage={"cu.appearance": "dark"}, clicks=[("tabs", {"tab": "models"})])["elements"]["mtable"]["html"]
+        self.assertIn("#e8875a", html)
+        self.assertNotIn("#d97757", html)
+
+    def test_profile_has_a_light_and_a_dark_look(self):
+        self.assertEqual(self.page(storage={"cu.style": "profile"})["classes"], ["profile", "light"])
+        self.assertEqual(self.page(storage={"cu.style": "profile"}, system_dark=True)["classes"], ["profile"])
+        light = self.page(storage={"cu.style": "profile", "cu.appearance": "light"}, system_dark=True)
+        self.assertEqual(light["classes"], ["profile", "light"])
+        self.assertEqual(light["elements"]["appearance"]["text"], "☀︎ Light")
+
     def test_profile_follows_the_system_language(self):
         chinese = self.page(data(models={OPUS: [2480000000, 0, 0, 0]},
                                  days={"2026-01-01": {"m": 1, "tm": {OPUS: 2480000000}, "sp": None, "sc": 1}}),
@@ -123,7 +148,7 @@ class PageTests(unittest.TestCase):
         self.assertIn("Updated", english["elements"]["pfoot"]["text"])
 
     def test_profile_hides_the_theme_switch_and_ignores_the_theme(self):
-        result = self.page(storage={"cu.theme": "blue", "cu.style": "profile"})
+        result = self.page(storage={"cu.theme": "blue", "cu.style": "profile"}, system_dark=True)
         self.assertEqual(result["classes"], ["profile"])
         self.assertTrue(result["elements"]["themes"]["hidden"])
         self.assertFalse(result["elements"]["profile"]["hidden"])
