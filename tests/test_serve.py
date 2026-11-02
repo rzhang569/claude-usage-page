@@ -136,7 +136,7 @@ class ServerTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         built = self.page.read_bytes()
-        self.assertIn(b"const DATA = {", built)
+        self.assertIn(b"const ALL = {", built)
         self.assertNotIn(b"/*__DATA__*/null", built)
         for path in ("/", "/index.html"):
             with self.subTest(path=path):
@@ -167,7 +167,7 @@ class RebuildOnLoadTests(ServerTests):
         self.make_stale()
         status, headers, body = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn(b"const DATA = {", body)
+        self.assertIn(b"const ALL = {", body)
         self.assertNotEqual(body, self.body)
         self.assertEqual(body, self.page.read_bytes())
         self.assertEqual(headers["Cache-Control"], "no-store")
@@ -194,7 +194,7 @@ class RebuildOnLoadTests(ServerTests):
         self.page.unlink()
         status, _, body = self.request("/")
         self.assertEqual(status, 200)
-        self.assertIn(b"const DATA = {", body)
+        self.assertIn(b"const ALL = {", body)
 
     def test_failed_build_keeps_serving_the_last_page(self):
         (self.fixture.app / "template.html").unlink()
@@ -213,7 +213,7 @@ class RebuildOnLoadTests(ServerTests):
         bodies = {body for _, _, body in responses}
         self.assertEqual(len(bodies), 1)
         self.assertEqual((self.fixture.app / "builds.log").read_text(encoding="utf-8").count("built"), 1)
-        self.assertIn(b"const DATA = {", bodies.pop())
+        self.assertIn(b"const ALL = {", bodies.pop())
 
     # The inherited cases below assume the hand-written page is served untouched
     # or that a missing page stays missing; they don't apply once rebuilding is on.

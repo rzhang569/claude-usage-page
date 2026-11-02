@@ -102,8 +102,12 @@
 <body>
 <main>
   <div class="top">
-    <h1 id="title">Claude Code usage</h1>
+    <h1 id="title"></h1>
     <div class="switches">
+      <div class="seg" id="sources">
+        <button data-source="claude">Claude Code</button>
+        <button data-source="codex">Codex</button>
+      </div>
       <div class="seg" id="themes">
         <button data-theme="orange">Orange</button>
         <button data-theme="blue">Blue</button>
@@ -166,7 +170,10 @@
 </main>
 <div id="tip" hidden></div>
 <script>
-const DATA = /*__DATA__*/null;
+const ALL = /*__DATA__*/null;
+// A tool with no history on this computer doesn't appear at all.
+const SOURCES = { claude: ALL.claude || !ALL.codex ? ALL : null, codex: ALL.codex };
+const TOOL = { claude: "Claude Code", codex: "Codex" };
 
 const BOOKS = [
   ["The Little Prince", 22000],
@@ -195,6 +202,9 @@ let range = pick("cu.range", "all");
 let style = pick("cu.style", "card");
 let theme = pick("cu.theme", "orange");
 let mode = pick("cu.mode", "daily");
+let source = new URLSearchParams(location.search).get("source") || pick("cu.source", "claude");
+if (!SOURCES[source]) source = SOURCES.claude ? "claude" : "codex";
+let DATA;
 
 const fmt = n => {
   const units = [[1e9, "B"], [1e6, "m"], [1e3, "k"]];
@@ -208,6 +218,10 @@ const parse = s => { const [y, m, d] = s.split("-").map(Number); return new Date
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 
 function modelName(id) {
+  if (id.startsWith("gpt-")) {
+    const [version, ...words] = id.slice(4).split("-");
+    return ["GPT-" + version, ...words.map(w => w[0].toUpperCase() + w.slice(1))].join(" ");
+  }
   const m = /^claude-([a-z]+)((?:-\d{1,2}(?!\d))+)/.exec(id);
   if (!m) return id;
   const fam = m[1][0].toUpperCase() + m[1].slice(1);
@@ -229,23 +243,28 @@ function hourLabel(h) {
   return (h % 12 || 12) + " " + suffix;
 }
 
-const today = parse(DATA.today);
-const allDates = Object.keys(DATA.days).sort();
-const firstDay = allDates.length ? parse(allDates[0]) : today;
+const origin = () => `from this computer's ${TOOL[source]} history only`;
+let today, allDates, firstDay, RATIO, RANKED;
+
+function load() {
+  DATA = SOURCES[source];
+  today = parse(DATA.today);
+  allDates = Object.keys(DATA.days).sort();
+  firstDay = allDates.length ? parse(allDates[0]) : today;
+  // Each model's all-time mix of input / output / cache write / cache read, used to
+  // split days whose history only kept a per-model total.
+  RATIO = Object.fromEntries(Object.entries(DATA.models).map(([m, c]) => {
+    const t = sum(c) || 1; return [m, c.map(v => v / t)];
+  }));
+  // One color per model for every range, ranked by all-time tokens.
+  RANKED = [...new Set(Object.entries(DATA.models).map(([m, c]) => [modelName(m), sum(c)])
+    .sort((a, b) => b[1] - a[1]).map(([n]) => n))];
+}
 
 function window_() {
   const start = range === "all" ? firstDay : addDays(today, -(Number(range) - 1));
   return { start, startKey: iso(start), endKey: iso(today) };
 }
-
-// Each model's all-time mix of input / output / cache write / cache read, used to
-// split days whose history only kept a per-model total.
-const RATIO = Object.fromEntries(Object.entries(DATA.models).map(([m, c]) => {
-  const t = sum(c) || 1; return [m, c.map(v => v / t)];
-}));
-// One color per model for every range, ranked by all-time tokens.
-const RANKED = [...new Set(Object.entries(DATA.models).map(([m, c]) => [modelName(m), sum(c)])
-  .sort((a, b) => b[1] - a[1]).map(([n]) => n))];
 
 function splitOf(m, v) {
   const r = RATIO[m] || [0, 0, 0, 1];
@@ -279,6 +298,7 @@ function compute() {
     }
     msgs = DATA.totals.messages;
     sessions = DATA.totals.sessions;
+    estimated = !!DATA.estimated;
   } else {
     estimated = keys.some(k => !DATA.days[k].sp);
   }
@@ -423,7 +443,7 @@ const P = ZH ? {
   week: s => `${s} 当周`, through: s => `截至 ${s}`,
   duration: sec => { const mins = Math.round(sec / 60), h = Math.floor(mins / 60); return (h ? h + " 小时 " : "") + mins % 60 + " 分"; },
   amount: n => n >= 1e8 ? (n / 1e8).toFixed(1) + "亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + "万" : String(Math.round(n)),
-  updated: s => `更新于 ${s} · 仅统计这台电脑的 Claude Code 记录`,
+  updated: s => `更新于 ${s} · 仅统计这台电脑的 ${TOOL[source]} 记录`,
   stamp: d => `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
 } : {
   total: "Total tokens", peak: "Peak day", task: "Longest task", longest: "Longest streak", current: "Current streak",
@@ -432,12 +452,12 @@ const P = ZH ? {
   date: shortDate, month: d => d.toLocaleDateString("en-US", { month: "short" }),
   week: s => `Week of ${s}`, through: s => `Through ${s}`,
   duration, amount: fmt,
-  updated: s => `Updated ${s} · from this computer's Claude Code history only`,
+  updated: s => `Updated ${s} · ${origin()}`,
   stamp: d => d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
 };
 
 function drawProfile() {
-  const name = DATA.user || "you";
+  const name = ALL.user || "you";
   document.getElementById("acttitle").textContent = P.activity;
   for (const [m, key] of [["daily", "daily"], ["weekly", "weekly"], ["total", "cumulative"]])
     document.querySelector(`[data-mode=${m}]`).textContent = P[key];
@@ -483,6 +503,9 @@ function drawProfile() {
 
 function draw() {
   const isProfile = style === "profile";
+  document.getElementById("title").textContent = `${TOOL[source]} usage`;
+  document.getElementById("sources").hidden = !(SOURCES.claude && SOURCES.codex);
+  document.querySelectorAll("#sources button").forEach(b => b.setAttribute("aria-pressed", b.dataset.source === source));
   document.documentElement.classList.toggle("profile", isProfile);
   document.documentElement.classList.toggle("blue", theme === "blue" && !isProfile);
   document.getElementById("themes").hidden = isProfile;
@@ -495,7 +518,7 @@ function draw() {
   document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
   if (isProfile) {
     drawProfile();
-    document.getElementById("pfoot").textContent = P.updated(P.stamp(new Date(DATA.generatedAt)));
+    document.getElementById("pfoot").textContent = P.updated(P.stamp(new Date(ALL.generatedAt)));
     return;
   }
   document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.tab === tab));
@@ -504,11 +527,11 @@ function draw() {
   document.getElementById("models").hidden = tab !== "models";
   const s = compute();
   if (tab === "overview") drawOverview(s); else drawModels(s);
-  const when = new Date(DATA.generatedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  document.getElementById("foot").textContent = `Updated ${when} · from this computer's Claude Code history only`;
+  const when = new Date(ALL.generatedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  document.getElementById("foot").textContent = `Updated ${when} · ${origin()}`;
 }
 
-[["styles", "style", v => style = v], ["themes", "theme", v => theme = v],
+[["styles", "style", v => style = v], ["sources", "source", v => { source = v; load(); history.replaceState(null, "", location.pathname); }], ["themes", "theme", v => theme = v],
  ["modes", "mode", v => mode = v], ["tabs", "tab", v => tab = v], ["ranges", "range", v => range = v]]
   .forEach(([id, key, set]) => document.getElementById(id).addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
@@ -529,6 +552,7 @@ document.addEventListener("mousemove", e => {
 document.addEventListener("mouseleave", () => tip.hidden = true);
 let resizing;
 addEventListener("resize", () => { clearTimeout(resizing); resizing = setTimeout(draw, 150); });
+load();
 draw();
 </script>
 </body>

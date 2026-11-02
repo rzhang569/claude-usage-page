@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -32,7 +33,7 @@ class BuildCase(unittest.TestCase):
         html = Path(self.build.OUT).read_text(encoding="utf-8")
         self.assertNotIn("/*__DATA__*/null", html)
         # Decode the actual JS assignment; also verify its terminator so trailing junk fails.
-        start = html.index("const DATA = ") + len("const DATA = ")
+        start = html.index("const ALL = ") + len("const ALL = ")
         data, end = json.JSONDecoder().raw_decode(html[start:])
         self.assertTrue(html[start + end:].startswith(";\n"))
         self.assertIsInstance(data, dict)
@@ -48,7 +49,7 @@ class BuildCase(unittest.TestCase):
 
 class ParsingTests(BuildCase):
     def test_config_and_all_outputs_are_inside_temporary_directory(self):
-        for name in ("BASE", "ROOT", "STATS", "CACHE", "OUT", "TEMPLATE"):
+        for name in ("BASE", "ROOT", "STATS", "CODEX", "CACHE", "OUT", "TEMPLATE"):
             with self.subTest(path=name):
                 self.assertEqual(os.path.commonpath([getattr(self.build, name), self.temp.name]), self.temp.name)
         self.assertEqual(self.build.BASE, str(self.fixture.config))
@@ -216,7 +217,7 @@ class AggregationTests(BuildCase):
                 message_id="same", request_id="same")])
         for order in ([str(a), str(b)], [str(b), str(a)]):
             Path(self.build.CACHE).unlink(missing_ok=True)
-            with self.subTest(order=order), mock.patch.object(self.build.glob, "glob", return_value=order):
+            with self.subTest(order=order), mock.patch.object(self.build.glob, "glob", side_effect=lambda pattern, **_: order if "projects" in pattern else []):
                 data = self.run_build()
                 self.assertEqual(data["models"][MODEL], [110, 220, 330, 2440])
                 self.assertEqual(data["days"]["2026-01-02"]["tm"][MODEL], 2100)
@@ -302,7 +303,7 @@ class AggregationTests(BuildCase):
         payload = html[len(before):-len(after)]
         self.assertEqual(json.loads(payload)["user"], getpass.getuser())
         self.assertEqual(set(json.loads(payload)),
-                         {"generatedAt", "today", "user", "days", "hours", "models", "totals", "tasks"})
+                         {"generatedAt", "today", "user", "days", "hours", "models", "totals", "tasks", "codex", "claude"})
 
     def test_command_line_build_uses_config_override_and_script_relative_output(self):
         result = subprocess.run([sys.executable, str(self.fixture.app / "build.py")],
@@ -481,7 +482,7 @@ class CacheTests(BuildCase):
         self.fixture.clear_transcripts()
         with mock.patch.object(self.build, "parse", side_effect=AssertionError("deleted file parsed")):
             second = self.run_build()
-        for key in ("days", "hours", "models", "totals", "tasks"):
+        for key in ("days", "hours", "models", "totals", "tasks", "codex"):
             self.assertEqual(first[key], second[key])
         self.assertEqual(len(self.cache()["files"]), 4)
 
@@ -548,6 +549,296 @@ class CacheTests(BuildCase):
         self.assertEqual(data["models"][MODEL], [100, 200, 300, 2400])
 
 
+class CodexTests(BuildCase):
+    def event(self, ts, kind, payload):
+        return {"timestamp": ts, "type": kind, "payload": payload}
+
+    def tokens(self, ts, spent, cached, output):
+        usage = {"input_tokens": spent, "cached_input_tokens": cached, "output_tokens": output}
+        return self.event(ts, "event_msg", {"type": "token_count", "info": {"total_token_usage": usage}})
+
+    def session(self, thread="one", source="user"):
+        return [
+            self.event("2026-01-03T01:00:00Z", "session_meta", {"id": thread, "thread_source": source}),
+            self.event("2026-01-03T01:00:01Z", "event_msg", {"type": "task_started"}),
+            self.event("2026-01-03T01:00:02Z", "turn_context", {"model": "gpt-6.1-sol"}),
+            self.event("2026-01-03T01:00:03Z", "response_item", {"type": "message", "role": "user"}),
+            self.event("2026-01-03T01:00:04Z", "response_item", {"type": "message", "role": "developer"}),
+            self.tokens("2026-01-03T01:10:00Z", 100, 40, 10),
+            self.tokens("2026-01-03T01:20:00Z", 300, 140, 30),
+            self.event("2026-01-03T01:20:01Z", "response_item", {"type": "message", "role": "assistant"}),
+            self.event("2026-01-03T01:20:01Z", "event_msg", {"type": "task_complete", "duration_ms": 900000}),
+        ]
+
+    def write_session(self, rows, name="one.jsonl"):
+        path = self.fixture.codex / "sessions" / "2026" / "01" / "03" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(json.dumps(item) + "\n" for item in rows), encoding="utf-8")
+        return path
+
+    def write_threads(self, rows):
+        self.fixture.codex.mkdir(exist_ok=True)
+        db = sqlite3.connect(self.fixture.codex / "state_5.sqlite")
+        db.execute("CREATE TABLE threads (id TEXT, created_at INT, tokens_used INT, model TEXT, thread_source TEXT,"
+                   " updated_at INT)")
+        db.executemany("INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?)", [(*row, row[1]) for row in rows])
+        db.commit()
+        db.close()
+
+    def test_no_codex_folder_means_no_codex_view(self):
+        self.assertIsNone(self.run_build()["codex"])
+
+    def test_session_counts_tokens_from_running_totals_and_skips_other_roles(self):
+        self.write_session(self.session())
+        codex = self.run_build()["codex"]
+        self.assertEqual(codex["models"], {"gpt-6.1-sol": [160, 30, 0, 140]})
+        self.assertEqual(codex["totals"], {"sessions": 1, "messages": 2})
+        day = next(iter(codex["days"].values()))
+        self.assertEqual(day, {"m": 2, "tm": {"gpt-6.1-sol": 330}, "sp": [160, 30, 0, 140], "sc": 1})
+        self.assertEqual(list(codex["tasks"].values()), [900])
+
+    def test_automatic_reviews_are_left_out(self):
+        self.write_session(self.session("review", "guardian_review"))
+        self.assertIsNone(self.run_build()["codex"])
+
+    def test_reviews_marked_only_by_their_source_are_left_out_too(self):
+        rows = self.session("review", "subagent")
+        rows[0]["payload"]["source"] = {"subagent": {"other": "guardian"}}
+        self.write_session(rows)
+        self.assertIsNone(self.run_build()["codex"])
+
+    def test_per_response_records_replace_running_totals_and_days_are_utc(self):
+        record = self.event("2026-01-03T01:30:00Z", "token_usage_record", {
+            "usage": {"input_tokens": 50, "cached_input_tokens": 20, "cache_write_input_tokens": 5, "output_tokens": 7}})
+        self.write_session([*self.session()[:3], record, self.tokens("2026-01-03T01:30:01Z", 900, 0, 900)])
+        codex = self.run_build()["codex"]
+        self.assertEqual(codex["models"], {"gpt-6.1-sol": [25, 7, 5, 20]})
+        self.assertEqual(list(codex["days"]), ["2026-01-03"])
+
+    def test_threads_without_token_rows_fill_in_from_the_database(self):
+        self.write_session(self.session())
+        created = int(self.build.epoch("2026-01-01T12:00:00Z"))
+        self.write_threads([("one", created, 330, "gpt-6.1-sol", "user"),
+                            ("gone", created, 660, "gpt-6.1-sol", "user"),
+                            ("review", created, 33, "codex-auto-review", "guardian_review"),
+                            ("empty", created, 0, "gpt-6.1-sol", "user")])
+        codex = self.run_build()["codex"]
+        self.assertEqual(codex["totals"]["sessions"], 3)
+        self.assertEqual(sum(codex["models"]["gpt-6.1-sol"]), 990)
+        self.assertNotIn("codex-auto-review", codex["models"])
+        history = [d for d in codex["days"].values() if d["sp"] is None]
+        self.assertEqual(len(history), 1)
+        self.assertTrue(codex["estimated"])
+        self.assertEqual(history[0]["tm"], {"gpt-6.1-sol": 660})
+
+    def test_a_lost_threads_total_is_shared_over_days_with_other_activity(self):
+        self.write_session(self.session())
+        self.write_session(json.loads(json.dumps(self.session("two")).replace("2026-01-03", "2026-01-04")), "two.jsonl")
+        start = int(self.build.epoch("2026-01-02T12:00:00Z"))
+        self.write_threads([("gone", start, 300, "gpt-6.1-sol", "user")])
+        db = sqlite3.connect(self.fixture.codex / "state_5.sqlite")
+        db.execute("UPDATE threads SET updated_at = ?", (start + 4 * 86400,))
+        db.commit()
+        db.close()
+        days = self.run_build()["codex"]["days"]
+        self.assertEqual({k: v["tm"]["gpt-6.1-sol"] for k, v in days.items() if v["sp"] is None},
+                         {"2026-01-03": 480, "2026-01-04": 480})
+        self.assertEqual(days["2026-01-02"]["tm"], {})
+
+    def test_a_grown_session_only_adds_the_new_tokens_and_messages(self):
+        rows = self.session()
+        path = self.write_session(rows[:6])
+        partial = self.run_build()["codex"]
+        self.assertEqual(sum(partial["models"]["gpt-6.1-sol"]), 110)
+        os.utime(path, None)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write("".join(json.dumps(item) + "\n" for item in rows[6:]))
+        codex = self.run_build()["codex"]
+        self.assertEqual(sum(codex["models"]["gpt-6.1-sol"]), 330)
+        self.assertEqual(codex["totals"]["messages"], 2)
+        self.assertEqual(list(codex["tasks"].values()), [900])
+
+    def test_a_half_written_last_line_is_read_once_it_is_complete(self):
+        rows = self.session()
+        path = self.write_session(rows[:6])
+        line = json.dumps(rows[6])
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(line[:20])
+        self.run_build()
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(line[20:] + "\n")
+        self.assertEqual(sum(self.run_build()["codex"]["models"]["gpt-6.1-sol"]), 330)
+
+    def test_a_grown_session_is_resumed_not_read_again(self):
+        rows = self.session()
+        path = self.write_session(rows[:6])
+        self.run_build()
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write("".join(json.dumps(item) + "\n" for item in rows[6:]))
+        cache = self.cache()
+        next(iter(cache["codex"].values()))["m"]["2000-01-01"] = 7  # Only survives if the entry is kept.
+        Path(self.build.CACHE).write_text(json.dumps(cache), encoding="utf-8")
+        self.assertEqual(self.run_build()["codex"]["days"]["2000-01-01"]["m"], 7)
+
+    def test_a_task_keeps_the_longest_run_of_its_start_day(self):
+        started = int(self.build.epoch("2026-01-03T23:50:00Z"))
+        done = {"type": "task_complete", "started_at": started}
+        self.write_session([*self.session()[:3],
+                            self.event("2026-01-04T00:10:00Z", "event_msg", {**done, "duration_ms": 1200000}),
+                            self.event("2026-01-04T00:20:00Z", "event_msg", {**done, "duration_ms": 300000})])
+        self.assertEqual(self.run_build()["codex"]["tasks"], {"2026-01-03": 1200})
+
+    def test_a_resumed_session_stays_on_the_day_it_started(self):
+        rows = self.session()
+        self.write_session([*rows, self.event("2026-01-05T01:00:00Z", "session_meta", {"id": "one", "thread_source": "user"})])
+        days = self.run_build()["codex"]["days"]
+        self.assertEqual(days["2026-01-03"]["sc"], 1)
+        self.assertNotIn("2026-01-05", days)
+
+    def test_a_file_with_messages_but_no_token_rows_shares_its_total_by_message(self):
+        rows = [row for row in self.session() if row["type"] != "event_msg" or row["payload"]["type"] != "token_count"]
+        later = self.event("2026-01-04T01:00:00Z", "response_item", {"type": "message", "role": "user"})
+        self.write_session([*rows, later])
+        self.write_threads([("one", int(self.build.epoch("2026-01-03T01:00:00Z")), 300, "gpt-6.1-sol", "user")])
+        days = self.run_build()["codex"]["days"]
+        self.assertEqual({k: v["tm"] for k, v in days.items()},
+                         {"2026-01-03": {"gpt-6.1-sol": 200}, "2026-01-04": {"gpt-6.1-sol": 100}})
+
+    def test_the_newest_state_database_wins(self):
+        self.write_threads([("new", 1767400000, 70, "gpt-6.1-sol", "user")])
+        old = self.fixture.codex / "state_1.sqlite"
+        db = sqlite3.connect(old)
+        db.execute("CREATE TABLE threads (id TEXT, created_at INT, tokens_used INT, model TEXT, thread_source TEXT)")
+        db.execute("INSERT INTO threads VALUES ('old', 1767400000, 900, 'gpt-6.1-sol', 'user')")
+        db.commit()
+        db.close()
+        os.utime(old, (1000, 1000))
+        self.assertEqual(sum(self.run_build()["codex"]["models"]["gpt-6.1-sol"]), 70)
+
+    def test_a_damaged_state_database_leaves_the_session_files_counted(self):
+        self.write_session(self.session())
+        (self.fixture.codex / "state_5.sqlite").write_bytes(b"not a database")
+        self.assertEqual(sum(self.run_build()["codex"]["models"]["gpt-6.1-sol"]), 330)
+
+    def test_today_is_the_utc_date(self):
+        self.write_session(self.session())
+        with mock.patch.object(self.build.time, "time", return_value=self.build.epoch("2026-01-04T02:00:00Z")):
+            self.assertEqual(self.run_build()["codex"]["today"], "2026-01-04")
+
+    def test_running_totals_do_not_double_a_response_that_also_has_a_record(self):
+        record = self.event("2026-01-03T01:30:01Z", "token_usage_record", {"usage": {"input_tokens": 100, "output_tokens": 10}})
+        self.write_session([*self.session()[:3], self.tokens("2026-01-03T01:30:00Z", 100, 0, 10), record])
+        self.assertEqual(self.run_build()["codex"]["models"], {"gpt-6.1-sol": [100, 10, 0, 0]})
+
+    def test_a_file_with_records_ignores_its_running_totals_on_every_day(self):
+        record = self.event("2026-01-03T01:30:01Z", "token_usage_record", {"usage": {"input_tokens": 100}})
+        self.write_session([*self.session()[:3], self.tokens("2026-01-02T01:30:00Z", 900, 0, 0), record])
+        self.assertEqual(list(self.run_build()["codex"]["days"]), ["2026-01-03"])
+
+    def test_a_running_total_that_resets_adds_nothing_until_it_grows_again(self):
+        self.write_session([*self.session()[:3], self.tokens("2026-01-03T01:10:00Z", 100, 0, 0),
+                            self.tokens("2026-01-03T01:20:00Z", 50, 0, 0), self.tokens("2026-01-03T01:30:00Z", 120, 0, 0)])
+        self.assertEqual(self.run_build()["codex"]["models"]["gpt-6.1-sol"][0], 170)
+
+    def test_more_cached_than_input_never_counts_negative(self):
+        self.write_session([*self.session()[:3], self.tokens("2026-01-03T01:10:00Z", 10, 40, 5)])
+        self.assertEqual(self.run_build()["codex"]["models"]["gpt-6.1-sol"], [0, 5, 0, 40])
+
+    def test_odd_rows_are_skipped_not_fatal(self):
+        odd = [self.tokens("not a date", 5, 0, 5), {"timestamp": 7, "type": "event_msg", "payload": {}}, ["list"], "text",
+               self.event("2026-01-03T01:10:00Z", "token_usage_record",
+                          {"usage": {"input_tokens": 9, "cached_input_tokens": None, "output_tokens": None}})]
+        self.write_session([*self.session()[:3], *odd])
+        self.assertEqual(self.run_build()["codex"]["models"]["gpt-6.1-sol"], [9, 0, 0, 0])
+
+    def test_two_files_of_one_thread_are_one_session_and_are_not_topped_up(self):
+        full = self.write_session(self.session())
+        header = self.write_session([row for row in self.session() if row["type"] == "session_meta"], "two.jsonl")
+        self.write_threads([("one", 1767400000, 330, "gpt-6.1-sol", "user")])
+        database = [str(self.fixture.codex / "state_5.sqlite")]
+        for order in ([str(full), str(header)], [str(header), str(full)]):
+            found = lambda pattern, **_: order if "sessions" in pattern else database
+            with self.subTest(order=order), mock.patch.object(self.build.glob, "glob", side_effect=found):
+                codex = self.build.codex_data({})
+                self.assertEqual(sum(codex["models"]["gpt-6.1-sol"]), 330)
+                self.assertEqual(codex["totals"]["sessions"], 1)
+
+    def test_a_later_session_header_does_not_change_the_thread(self):
+        other = self.event("2026-01-03T01:30:00Z", "session_meta", {"id": "other", "thread_source": "user"})
+        self.write_session([*self.session(), other])
+        self.write_threads([("one", 1767400000, 330, "gpt-6.1-sol", "user")])
+        self.assertEqual(sum(self.run_build()["codex"]["models"]["gpt-6.1-sol"]), 330)
+
+    def test_subagents_cost_tokens_and_tasks_but_are_not_sessions(self):
+        self.write_session(self.session("helper", "subagent"))
+        self.write_threads([("lost", 1767400000, 70, "gpt-6.1-sol", "subagent")])
+        codex = self.run_build()["codex"]
+        self.assertEqual(codex["totals"]["sessions"], 0)
+        self.assertEqual(sum(codex["models"]["gpt-6.1-sol"]), 400)
+        self.assertEqual(list(codex["tasks"].values()), [900])
+
+    def test_messages_land_in_the_local_hour_for_peak_hour(self):
+        self.write_session(self.session())
+        self.write_session(self.session("two"), "two.jsonl")
+        hours = self.run_build()["codex"]["hours"]["2026-01-03"]
+        self.assertEqual((max(hours), sum(hours)), (4, 4))
+
+    def test_a_turn_without_a_model_keeps_the_last_one(self):
+        rows = self.session()[:3]
+        self.write_session([*rows, self.event("2026-01-03T01:05:00Z", "turn_context", {}), self.tokens("2026-01-03T01:10:00Z", 10, 0, 0)])
+        self.assertEqual(list(self.run_build()["codex"]["models"]), ["gpt-6.1-sol"])
+
+    def test_a_file_without_a_header_still_counts_its_tasks(self):
+        self.write_session(self.session()[1:])
+        self.assertEqual(list(self.run_build()["codex"]["tasks"].values()), [900])
+
+    def test_a_lost_threads_total_stops_at_its_last_day(self):
+        self.write_session(self.session())
+        self.write_session(json.loads(json.dumps(self.session("two")).replace("2026-01-03", "2026-01-04")), "two.jsonl")
+        self.write_threads([("gone", int(self.build.epoch("2026-01-02T01:00:00Z")), 300, "gpt-6.1-sol", "user")])
+        db = sqlite3.connect(self.fixture.codex / "state_5.sqlite")
+        db.execute("UPDATE threads SET updated_at = ?", (int(self.build.epoch("2026-01-03T23:00:00Z")),))
+        db.commit()
+        db.close()
+        days = self.run_build()["codex"]["days"]
+        self.assertEqual(days["2026-01-03"]["tm"]["gpt-6.1-sol"], 630)
+        self.assertEqual(days["2026-01-04"]["tm"]["gpt-6.1-sol"], 330)
+
+    def test_building_changes_nothing_in_the_codex_folder(self):
+        self.write_session(self.session())
+        self.write_threads([("one", 1767400000, 330, "gpt-6.1-sol", "user")])
+        before = {str(path): path.read_bytes() for path in self.fixture.codex.rglob("*") if path.is_file()}
+        self.run_build()
+        self.assertEqual({str(path): path.read_bytes() for path in self.fixture.codex.rglob("*") if path.is_file()}, before)
+
+    def test_a_removed_codex_folder_hides_codex_until_it_comes_back(self):
+        self.write_session(self.session())
+        first = self.run_build()["codex"]
+        Path(self.fixture.codex).rename(self.fixture.root / "away")
+        self.assertIsNone(self.run_build()["codex"])
+        self.assertTrue(self.cache()["codex"])
+        Path(self.fixture.root / "away").rename(self.fixture.codex)
+        self.assertEqual(self.run_build()["codex"], first)
+
+    def test_claude_code_is_marked_absent_without_history_or_a_folder(self):
+        self.assertTrue(self.run_build()["claude"])
+        self.fixture.clear_transcripts()
+        (self.fixture.config / "stats-cache.json").unlink()
+        Path(self.build.CACHE).unlink()
+        self.assertFalse(self.run_build()["claude"])
+
+    def test_a_removed_claude_folder_is_marked_absent_even_with_a_cache(self):
+        self.run_build()
+        self.fixture.config.rename(self.fixture.root / "away")
+        self.assertFalse(self.run_build()["claude"])
+
+    def test_deleted_session_files_stay_counted(self):
+        path = self.write_session(self.session())
+        first = self.run_build()["codex"]
+        path.unlink()
+        self.assertEqual(self.run_build()["codex"], first)
+
+
 class IOTests(BuildCase):
     def test_load_json_returns_default_for_missing_invalid_and_unreadable_files(self):
         path = self.fixture.root / "sample.json"
@@ -590,6 +881,12 @@ class IOTests(BuildCase):
         with mock.patch.object(self.build, "parse", side_effect=parse):
             self.assertGreater(self.run_build()["totals"]["messages"], 0)
 
+    def test_trouble_with_codex_leaves_the_claude_page_working(self):
+        with mock.patch.object(self.build, "codex_data", side_effect=TypeError("odd file")):
+            data = self.run_build()
+        self.assertIsNone(data["codex"])
+        self.assertEqual(data["totals"]["messages"], 110)
+
     def test_a_script_tag_in_a_model_name_stays_inside_the_data(self):
         self.only([row("a", "2026-01-03T01:00:00Z", kind="assistant", counts=(1, 1, 1, 1), model="</script><b>")])
         self.assertIn("</script><b>", self.run_build()["models"])
@@ -612,7 +909,7 @@ class IOTests(BuildCase):
                 self.assertEqual(json.loads(text)["v"], self.build.CACHE_VERSION)
             else:
                 self.assertEqual(out_path.read_text(encoding="utf-8"), "old page")
-                self.assertIn("const DATA = {", text)
+                self.assertIn("const ALL = {", text)
                 self.assertNotIn("/*__DATA__*/null", text)
                 self.assertTrue(text.endswith("</html>\n"))
             replaced.append(dst)

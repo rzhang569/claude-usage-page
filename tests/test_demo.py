@@ -19,7 +19,7 @@ class DemoTests(unittest.TestCase):
 
     def test_demo_embeds_valid_data_and_labels_itself(self):
         html = self.build()
-        data = json.loads(re.search(r"const DATA = (\{.*?\});\n", html).group(1))
+        data = json.loads(re.search(r"const ALL = (\{.*?\});\n", html).group(1))
         self.assertGreater(len(data["days"]), 30)
         self.assertIn("Live demo with made-up data", html)
         self.assertNotIn("/*__DATA__*/null", html)

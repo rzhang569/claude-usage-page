@@ -15,7 +15,7 @@ OPUS, SONNET = "claude-opus-5-5", "claude-sonnet-5-5"
 def data(**changes):
     # Thursday 2026-01-01, so Friday and Saturday of this week are future cells on the heatmap.
     return {
-        "generatedAt": "2026-01-03T12:00:00", "today": "2026-01-01", "user": "demo",
+        "generatedAt": "2026-01-03T12:00:00", "today": "2026-01-01", "user": "demo", "claude": True,
         "days": {
             "2025-12-30": {"m": 5, "tm": {OPUS: 1000}, "sp": [100, 100, 300, 500], "sc": 1},
             "2025-12-31": {"m": 7, "tm": {OPUS: 2000}, "sp": [200, 200, 600, 1000], "sc": 1},
@@ -26,8 +26,17 @@ def data(**changes):
         "models": {OPUS: [650, 650, 1950, 3250], SONNET: [0, 0, 0, 1]},
         "totals": {"sessions": 5, "messages": 27},
         "tasks": {"2025-11-01": 5400, "2026-01-01": 3599},
+        "codex": None,
         **changes,
     }
+
+
+CODEX = {
+    "today": "2026-01-02",
+    "days": {"2026-01-02": {"m": 2, "tm": {"gpt-6.1-sol": 4000000}, "sp": None, "sc": 1}},
+    "hours": {}, "models": {"gpt-6.1-sol": [1000000, 1000000, 0, 2000000]},
+    "totals": {"sessions": 1, "messages": 2}, "tasks": {"2026-01-02": 5192.034}, "estimated": True,
+}
 
 
 @unittest.skipUnless(shutil.which("node"), "needs Node to run the page's script")
@@ -140,10 +149,58 @@ class PageTests(unittest.TestCase):
         self.assertEqual((found["Longest streak"], found["Current streak"]), ("1 day", "1 day"))
 
     def test_model_names_drop_release_dates_and_keep_every_word(self):
-        cases = {"claude-opus-4-5-20251101": "Opus 4.5", "claude-sonnet-4-20250514": "Sonnet 4"}
+        cases = {"claude-opus-4-5-20251101": "Opus 4.5", "claude-sonnet-4-20250514": "Sonnet 4",
+                 "gpt-5.1-codex-max": "GPT-5.1 Codex Max", "gpt-4o": "GPT-4o", "codex-auto-review": "codex-auto-review"}
         for model, name in cases.items():
             with self.subTest(model=model):
                 self.assertEqual(self.tiles(self.page(data(models={model: [1, 1, 1, 1]})))["Favorite model"], name)
+
+    def test_source_switch_is_hidden_without_codex(self):
+        self.assertTrue(self.page()["elements"]["sources"]["hidden"])
+
+    def test_a_computer_with_only_codex_shows_only_codex(self):
+        result = self.page(data(claude=False, codex=CODEX))
+        self.assertEqual(result["elements"]["title"]["text"], "Codex usage")
+        self.assertTrue(result["elements"]["sources"]["hidden"])
+
+    def test_both_tools_show_the_switch(self):
+        self.assertFalse(self.page(data(codex=CODEX))["elements"]["sources"]["hidden"])
+
+    def test_a_computer_with_neither_tool_shows_an_empty_page(self):
+        result = self.page(data(claude=False))
+        self.assertEqual(result["elements"]["title"]["text"], "Claude Code usage")
+
+    def test_a_link_for_a_tool_that_is_gone_shows_the_other_one(self):
+        result = self.page(data(claude=False, codex=CODEX), search="?source=claude")
+        self.assertEqual(result["elements"]["title"]["text"], "Codex usage")
+
+    def test_switching_tools_clears_the_link_so_a_reload_keeps_the_choice(self):
+        result = self.page(data(codex=CODEX), search="?source=codex", clicks=[("sources", {"source": "claude"})])
+        self.assertEqual(result["addressBar"], ["/"])
+        self.assertEqual(result["storage"]["cu.source"], "claude")
+
+    def test_a_saved_codex_choice_falls_back_when_codex_is_gone(self):
+        result = self.page(storage={"cu.source": "codex"})
+        self.assertEqual(result["elements"]["title"]["text"], "Claude Code usage")
+
+    def test_codex_view_uses_its_own_data_and_today(self):
+        result = self.page(data(codex=CODEX), clicks=[("sources", {"source": "codex"})])
+        self.assertEqual(result["elements"]["title"]["text"], "Codex usage")
+        self.assertIn("Codex history only", result["elements"]["foot"]["text"])
+        found = self.tiles(result)
+        self.assertEqual(found["Longest task"], "1h 27m")
+        self.assertEqual(found["Favorite model"], "GPT-6.1 Sol")
+        self.assertEqual(found["Current streak"], "1 day")
+        self.assertEqual(self.tips(result, "heat")[-1], "Jan 2 — 2")
+
+    def test_codex_all_time_split_is_marked_estimated(self):
+        result = self.page(data(codex=CODEX), clicks=[("sources", {"source": "codex"})])
+        self.assertTrue(result["elements"]["split"]["text"].startswith("≈ "))
+
+    def test_the_address_can_pick_the_tool_without_changing_the_saved_choice(self):
+        result = self.page(data(codex=CODEX), search="?source=codex", storage={"cu.source": "claude"})
+        self.assertEqual(result["elements"]["title"]["text"], "Codex usage")
+        self.assertEqual(result["storage"]["cu.source"], "claude")
 
 
 if __name__ == "__main__":

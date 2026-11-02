@@ -33,6 +33,7 @@ class Fixture:
     def __init__(self, root):
         self.root = Path(root)
         self.config = self.root / "claude-config"
+        self.codex = self.root / "codex-home"
         self.app = self.root / "app"
         self.projects = self.config / "projects"
         self.projects.mkdir(parents=True)
@@ -108,12 +109,12 @@ class Fixture:
         spec = importlib.util.spec_from_file_location("isolated_build", self.app / "build.py")
         module = importlib.util.module_from_spec(spec)
         # BASE is evaluated during import. Never let it fall back to ~/.claude.
-        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.config)}):
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.config), "CODEX_HOME": str(self.codex)}):
             spec.loader.exec_module(module)
         return module
 
     def env(self):
-        return {**os.environ, "CLAUDE_CONFIG_DIR": str(self.config),
+        return {**os.environ, "CLAUDE_CONFIG_DIR": str(self.config), "CODEX_HOME": str(self.codex),
                 "PYTHONDONTWRITEBYTECODE": "1", "TZ": "EST5"}
 
 

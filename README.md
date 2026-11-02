@@ -1,10 +1,10 @@
 # claude-usage-page
 
-The Claude desktop app used to show a usage card on the Code tab's new-session screen: sessions, messages, tokens, a day heatmap and a per-model breakdown. It was removed in Desktop v2.42304.0 (October 2026; see [anthropics/claude-code#102264](https://github.com/anthropics/claude-code/issues/102264)). This brings the card back as a small local web page, kept up to date in the background, with a `/my-usage` command in Claude Code to open it.
+The Claude desktop app used to show a usage card on the Code tab's new-session screen: sessions, messages, tokens, a day heatmap and a per-model breakdown. It was removed in Desktop v2.42304.0 (October 2026; see [anthropics/claude-code#102264](https://github.com/anthropics/claude-code/issues/102264)). This brings the card back as a small local web page, kept up to date in the background, with a `/my-usage` command in Claude Code to open it. It can show your local Codex usage the same way.
 
 **[Try the live demo](https://rzhang569.github.io/claude-usage-page/)** (made-up data). Works on macOS and Windows.
 
-Unofficial; not affiliated with Anthropic.
+Unofficial; not affiliated with Anthropic or OpenAI.
 
 ![Overview tab, demo data](docs/overview.png)
 ![Models tab, demo data](docs/models.png)
@@ -33,11 +33,24 @@ Only the new part of each transcript is read, so long sessions stay fast.
 
 Everything is read locally and nothing leaves your computer.
 
+### Claude Code
+
 - History comes from `~/.claude/stats-cache.json`, the file behind `claude /stats`. It keeps totals for days whose transcripts Claude Code has since cleaned up, so long-time users don't lose their early months.
 - Days after that file was last written come from the transcripts in `~/.claude/projects/`, counting each API response once.
 - A parse cache keeps what it has seen, so transcripts deleted later by Claude Code's cleanup still count.
 
 Totals land within a few percent of `claude /stats`. Two known differences: `stats-cache.json` splits days in UTC, so those older days change at UTC midnight while newer days use your local time; and older days only kept per-model totals, so their input / output / cache split is estimated from each model's overall mix (marked with ≈).
+
+### Codex
+
+A switch at the top shows Codex in the same views. OpenAI's own Codex page adds up all your devices in the cloud; this one shows only what this computer holds, so the two can differ.
+
+The page shows only the tools with history on this computer, so with just one of them there is no switch. A tool you add later appears at the next rebuild, and one whose folder (`~/.claude`, or `~/.codex` / `CODEX_HOME`) you delete disappears; its history stays in the parse cache and returns if the folder does.
+
+- Days, models and tasks come from `~/.codex/sessions/`, counting each API response once. Only token counts and timestamps are kept, never what was said.
+- Days are split in UTC, like OpenAI's page, so the Codex view can show a different date from the Claude Code one in the evening. Automatic approval reviews are left out too.
+- **Longest task** uses the run time Codex records for each task, the same figure as its profile page. It can be shorter than the time between start and finish, and it isn't measured the same way as Claude Code's.
+- Threads whose session files are gone come from Codex's state database. They only have a total, so it is shared over the active days in the thread's life and its input / output / cache split is estimated (marked with ≈).
 
 ## Install
 
@@ -89,7 +102,7 @@ Run the standard-library-only test suite from the repository root:
 python3 -m unittest -v
 ```
 
-Tests generate fake Claude data and application copies in temporary directories, set `CLAUDE_CONFIG_DIR` there, and start server subprocesses on free localhost ports. They do not use or modify your real Claude data or installed usage page. The tests of the page's own script need Node and are skipped without it.
+Tests generate fake Claude and Codex data and application copies in temporary directories, set `CLAUDE_CONFIG_DIR` and `CODEX_HOME` there, and start server subprocesses on free localhost ports. They do not use or modify your real data or installed usage page. The tests of the page's own script need Node and are skipped without it.
 
 ## License
 
