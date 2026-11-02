@@ -19,7 +19,7 @@ Unofficial; not affiliated with Anthropic or OpenAI.
 - **Classic and Profile**: the card above, or a profile page with five totals and a year of daily, weekly or cumulative tokens. Profile follows your browser's language.
 - All / 30d / 7d ranges. Hover anything for exact values. Streaks and the heatmap always cover your whole history.
 - **Longest task** runs from a message you send to the end of the reply. A gap over 30 minutes ends it, so a sleeping computer doesn't count.
-- Pick an orange or a blue color theme.
+- Pick an orange or a blue color theme (Classic only).
 
 When the numbers update:
 
@@ -69,7 +69,7 @@ Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code. Use anot
 
 The installer copies the scripts to `~/.claude-usage-page/`, adds two launchd jobs (rebuild every hour; serve the page on 127.0.0.1 only, which serves the page and nothing else) and writes the skill to `~/.claude/skills/my-usage/`. Run it again after pulling to update.
 
-Uninstall with `./uninstall.sh`: it removes the launchd jobs, `~/.claude-usage-page/` and the skill.
+Uninstall with `./uninstall.sh`: it removes the launchd jobs, `~/.claude-usage-page/` and both skills. This also deletes the parse cache (`cache.json`), which holds history for transcripts Claude Code has since cleaned up and can't be rebuilt. To keep it, copy the file out before uninstalling, copy it back after reinstalling, then run `python3 build.py` in that folder.
 
 ### Windows
 
@@ -85,7 +85,7 @@ Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code. Use anot
 
 The installer copies the scripts to `%USERPROFILE%\.claude-usage-page\`, adds two Task Scheduler tasks (`claude-usage-page-build` every hour, `claude-usage-page-serve` at sign-in; both run without a console window) and writes the skill to `%USERPROFILE%\.claude\skills\my-usage\`. Run it again after pulling to update.
 
-Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it removes both tasks, `%USERPROFILE%\.claude-usage-page\` and the skill.
+Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it removes both tasks, `%USERPROFILE%\.claude-usage-page\` and both skills. This also deletes the parse cache (`cache.json`), which holds history for transcripts Claude Code has since cleaned up and can't be rebuilt. To keep it, copy the file out before uninstalling, copy it back after reinstalling, then run `python build.py` in that folder.
 
 Claude Code's and Codex's own files are never touched on either system; only the two skills are added.
 
