@@ -8,6 +8,7 @@ Unofficial; not affiliated with Anthropic or OpenAI.
 
 ![Overview tab, demo data](docs/overview.png)
 ![Models tab, demo data](docs/models.png)
+![Profile style, demo data](docs/profile.png)
 
 *Screenshots use made-up data.*
 
@@ -54,7 +55,7 @@ The page shows only the tools with history on this computer, so with just one of
 
 ## Install
 
-Needs Python 3 and Claude Code.
+Needs Python 3, and Claude Code, Codex or both.
 
 ### macOS
 
@@ -86,7 +87,9 @@ The installer copies the scripts to `%USERPROFILE%\.claude-usage-page\`, adds tw
 
 Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it removes both tasks, `%USERPROFILE%\.claude-usage-page\` and the skill.
 
-Claude Code's own files are never touched on either system.
+Claude Code's and Codex's own files are never touched on either system; only the two skills are added.
+
+The installer also adds `$my-usage` to Codex, which replies with a link that opens the Codex view beside the chat. Both commands are added even if one of the tools isn't installed yet, so they're there when it is.
 
 `/my-usage` shows up only in sessions started after the install: Claude Code reads its skill list when a session starts, so sessions that were already open won't list it. Start a new session, or restart Claude to make it appear in existing ones.
 

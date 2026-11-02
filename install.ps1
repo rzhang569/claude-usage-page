@@ -2,6 +2,7 @@
 #   %USERPROFILE%\.claude-usage-page\         the scripts, the built page and its parse cache
 #   Task Scheduler                             two tasks: rebuild hourly, serve on 127.0.0.1
 #   %USERPROFILE%\.claude\skills\my-usage\     the /my-usage command for Claude Code
+#   %USERPROFILE%\.codex\skills\my-usage\      the same for Codex, ready even if it comes later
 # Run again to update. uninstall.ps1 removes all of it. No admin rights needed.
 #   powershell -ExecutionPolicy Bypass -File install.ps1 [-Port 8788]
 param([int]$Port = 8788)
@@ -10,6 +11,7 @@ $ErrorActionPreference = "Stop"
 $src = $PSScriptRoot
 $dest = Join-Path $env:USERPROFILE ".claude-usage-page"
 $skill = Join-Path $env:USERPROFILE ".claude\skills\my-usage"
+$codex = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
 $buildTask = "claude-usage-page-build"
 $serveTask = "claude-usage-page-serve"
 
@@ -66,7 +68,7 @@ description: Show the local Claude Code usage card (sessions, tokens, heatmap, p
 The card is served at http://127.0.0.1:$Port/ and rebuilt every hour. Keep the turn short.
 
 1. Refresh it so it includes this session: ``"$pyFwd" "$buildFwd"``
-2. Open it in the default browser: ``"$pyFwd" -m webbrowser http://127.0.0.1:$Port/``
+2. Open it in the default browser: ``"$pyFwd" -m webbrowser "http://127.0.0.1:$Port/?source=claude"``
    If it does not load, run ``powershell -NoProfile -Command "Start-ScheduledTask -TaskName $serveTask"`` and open it again.
    If the user asks to see it beside the chat, open the same URL in the built-in browser pane instead.
 
@@ -75,6 +77,20 @@ If build.py fails, show the last lines of its output and stop.
 "@
 # UTF-8 without a byte-order mark, so the skill's front matter parses.
 [IO.File]::WriteAllText((Join-Path $skill "SKILL.md"), $skillText, (New-Object Text.UTF8Encoding $false))
+
+$codexSkill = Join-Path $codex "skills\my-usage"
+New-Item -ItemType Directory -Force -Path $codexSkill | Out-Null
+$skillText = @"
+---
+name: my-usage
+description: Show the local Claude Code and Codex usage card (sessions, tokens, heatmap, per-model breakdown). Use only when the user types `$my-usage or asks to see their usage card.
+---
+
+Do not run any command. The page is served locally and rebuilds itself when opened.
+
+Reply with only this link: [Open your usage card](http://127.0.0.1:$Port/?source=codex)
+"@
+[IO.File]::WriteAllText((Join-Path $codexSkill "SKILL.md"), $skillText, (New-Object Text.UTF8Encoding $false))
 
 Write-Host "Installed. Open http://127.0.0.1:$Port/ or type /my-usage in a new Claude Code session"
 Write-Host "(sessions that were already open won't list it)."

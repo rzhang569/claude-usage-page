@@ -3,6 +3,7 @@
 #   ~/.claude-usage-page/          the scripts, the built page and its parse cache
 #   ~/Library/LaunchAgents/        two jobs: rebuild hourly, serve on 127.0.0.1
 #   ~/.claude/skills/my-usage/     the /my-usage command for Claude Code
+#   ~/.codex/skills/my-usage/      the same for Codex, ready even if it comes later
 # Run again to update. uninstall.sh removes all of it.
 set -eu
 
@@ -11,6 +12,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 DEST="$HOME/.claude-usage-page"
 AGENTS="$HOME/Library/LaunchAgents"
 SKILL="$HOME/.claude/skills/my-usage"
+CODEX_SKILL="${CODEX_HOME:-$HOME/.codex}/skills/my-usage"
 BUILD=io.github.rzhang569.claude-usage-page.build
 SERVE=io.github.rzhang569.claude-usage-page.serve
 
@@ -22,7 +24,7 @@ fi
 PY="$(command -v python3 || true)"
 [ -n "$PY" ] || { echo "python3 not found"; exit 1; }
 
-mkdir -p "$DEST" "$AGENTS" "$SKILL"
+mkdir -p "$DEST" "$AGENTS" "$SKILL" "$CODEX_SKILL"
 cp "$SRC/build.py" "$SRC/serve.py" "$SRC/template.html" "$DEST/"
 
 plist() { # label, interval-or-keepalive, script args...
@@ -75,12 +77,23 @@ description: Show the local Claude Code usage card (sessions, tokens, heatmap, p
 The card is served at http://127.0.0.1:$PORT/ and rebuilt every hour. Keep the turn short.
 
 1. Refresh it so it includes this session: \`$PY $DEST/build.py\`
-2. Open it in the default browser: \`open http://127.0.0.1:$PORT/\`
+2. Open it in the default browser: \`open "http://127.0.0.1:$PORT/?source=claude"\`
    If it does not load, run \`launchctl kickstart -k gui/\$(id -u)/$SERVE\` and open it again.
    If the user asks to see it beside the chat, open the same URL in the built-in browser pane instead.
 
 Then say in one line that the card is open and when it was updated. Do not restate its numbers unless asked.
 If build.py fails, show the last lines of its output and of $DEST/$BUILD.log, and stop.
+SKILL
+
+cat > "$CODEX_SKILL/SKILL.md" <<SKILL
+---
+name: my-usage
+description: Show the local Claude Code and Codex usage card (sessions, tokens, heatmap, per-model breakdown). Use only when the user types \$my-usage or asks to see their usage card.
+---
+
+Do not run any command. The page is served locally and rebuilds itself when opened.
+
+Reply with only this link: [Open your usage card](http://127.0.0.1:$PORT/?source=codex)
 SKILL
 
 echo "Installed. Open http://127.0.0.1:$PORT/ or type /my-usage in a new Claude Code session"
