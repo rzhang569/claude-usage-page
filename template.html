@@ -139,7 +139,7 @@ function modelName(id) {
 }
 
 function duration(sec) {
-  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  const mins = Math.round(sec / 60), d = Math.floor(mins / 1440), h = Math.floor(mins % 1440 / 60), m = mins % 60;
   return (d ? d + "d " : "") + (d || h ? h + "h " : "") + m + "m";
 }
 
@@ -217,14 +217,12 @@ function compute() {
   let d = active.has(iso(today)) || range === "all" && DATA.days[iso(today)] ? today : addDays(today, -1);
   while (DATA.days[iso(d)]) { current++; d = addDays(d, -1); }
 
-  const startSec = w.start.getTime() / 1000;
-  let longestSession = range === "all" ? DATA.totals.longest : 0;
-  for (const [lo, hi] of DATA.sessions) if (lo >= startSec) longestSession = Math.max(longestSession, hi - lo);
+  const longestTask = Math.max(0, ...Object.entries(DATA.tasks).filter(([k]) => k >= w.startKey).map(([, v]) => v));
 
   const peak = hours.indexOf(Math.max(...hours));
   const favorite = Object.entries(models).sort((a, b) => sum(b[1]) - sum(a[1]))[0];
   return { keys, msgs, sessions, tok, total, models, span, activeDays: keys.length, estimated,
-    hasHours: sum(hours) > 0, longest, current, longestSession, busiest, peak,
+    hasHours: sum(hours) > 0, longest, current, longestTask, busiest, peak,
     favorite: favorite ? favorite[0] : "—" };
 }
 function tile(k, v) { return `<div class="tile"><div class="k">${k}</div><div class="v" data-tip="${v}">${v}</div></div>`; }
@@ -241,7 +239,7 @@ function drawOverview(s) {
   document.getElementById("meta").innerHTML =
     tile("Longest streak", s.longest + (s.longest === 1 ? " day" : " days")) +
     tile("Current streak", s.current + (s.current === 1 ? " day" : " days")) +
-    tile("Longest session", s.longestSession ? duration(s.longestSession) : "—") +
+    tile("Longest task", s.longestTask ? duration(s.longestTask) : "—") +
     tile("Most active day", busy);
 
   const counts = allDates.map(k => DATA.days[k].m).filter(Boolean).sort((a, b) => a - b);

@@ -14,7 +14,7 @@ SPLIT = (0.0003, 0.004, 0.04, 0.9557)  # input, output, cache write, cache read
 
 def demo_data(today):
     rng = random.Random(7)
-    days, hours, sessions = {}, {}, []
+    days, hours, tasks = {}, {}, {}
     models = {name: [0, 0, 0, 0] for name in MIX}
     messages = total_sessions = 0
     for back in range(150):
@@ -35,13 +35,12 @@ def demo_data(today):
         hours[key] = [0] * 24
         for _ in range(count):
             hours[key][min(23, max(0, int(rng.gauss(16, 4))))] += 1
-        start = dt.datetime(day.year, day.month, day.day, 14).timestamp()
-        sessions += [[start, start + rng.randint(600, 30000)] for _ in range(day_sessions)]
+        tasks[key] = rng.randint(300, 7000)
         messages += count
         total_sessions += day_sessions
     return {"generatedAt": f"{today.isoformat()}T21:30:00", "today": today.isoformat(), "days": days,
-            "hours": hours, "models": models, "sessions": sessions,
-            "totals": {"sessions": total_sessions, "messages": messages, "longest": 3 * 86400 + 5400}}
+            "hours": hours, "models": models, "tasks": tasks,
+            "totals": {"sessions": total_sessions, "messages": messages}}
 
 
 def main():

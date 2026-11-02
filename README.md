@@ -13,9 +13,10 @@ Unofficial; not affiliated with Anthropic.
 
 ## What it shows
 
-- **Overview**: sessions, messages, total tokens, active days, peak hour, favorite model, longest and current streak, longest session, most active day, a 26-week heatmap and the input / output / cache split.
+- **Overview**: sessions, messages, total tokens, active days, peak hour, favorite model, longest and current streak, longest task, most active day, a 26-week heatmap and the input / output / cache split.
 - **Models**: tokens per day stacked by model, and a table with each model's share and token types.
 - All / 30d / 7d ranges. Hover anything for exact values.
+- **Longest task** runs from a message you send to the end of the reply. A gap over 30 minutes ends it, so a sleeping computer doesn't count.
 
 When the numbers update:
 

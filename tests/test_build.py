@@ -158,17 +158,17 @@ class AggregationTests(BuildCase):
             "2026-01-03": {"m": 2, "tm": {MODEL: 26}, "sp": [5, 6, 7, 8], "sc": 1},
         })
         self.assertEqual(data["models"], {MODEL: [120, 226, 342, 2448], OTHER_MODEL: [51, 62, 73, 324]})
-        self.assertEqual(data["totals"], {"messages": 110, "sessions": 12, "longest": 10800})
+        self.assertEqual(data["totals"], {"messages": 110, "sessions": 12})
 
-    def test_stats_only_retains_utc_dates_totals_and_milliseconds_conversion(self):
+    def test_stats_only_retains_utc_dates_and_totals(self):
         self.fixture.clear_transcripts()
         data = self.run_build()
-        self.assertEqual(data["totals"], {"messages": 100, "sessions": 10, "longest": 7200})
+        self.assertEqual(data["totals"], {"messages": 100, "sessions": 10})
         self.assertEqual(data["days"]["2026-01-02"]["m"], 60)
         self.assertEqual(data["days"]["2026-01-02"]["tm"], {MODEL: 2000, OTHER_MODEL: 500})
         self.assertTrue(all(d["sp"] is None for d in data["days"].values()))
         self.assertEqual(data["hours"], {})
-        self.assertEqual(data["sessions"], [])
+        self.assertEqual(data["tasks"], {})
 
     def test_cutoff_is_end_of_last_computed_utc_day_not_last_transcript(self):
         self.only([row("old", "2026-01-02T23:59:59.999999Z", "old", "assistant", counts=(1000, 0, 0, 0)),
@@ -195,20 +195,17 @@ class AggregationTests(BuildCase):
         self.assertEqual(data["days"]["2026-01-02"]["sc"], 7)
         self.assertEqual(data["days"]["2026-01-03"], {"m": 1, "tm": {}, "sp": [0, 0, 0, 0], "sc": 0})
 
-    def test_cross_cutoff_session_is_not_counted_twice_but_extends_longest(self):
+    def test_cross_cutoff_session_is_not_counted_twice(self):
         self.only([row("start", "2026-01-02T23:00:00Z", "cross"),
                    row("end", "2026-01-03T04:00:00Z", "cross")])
         data = self.run_build()
-        self.assertEqual(data["totals"], {"messages": 101, "sessions": 10, "longest": 18000})
+        self.assertEqual(data["totals"], {"messages": 101, "sessions": 10})
 
     def test_session_spans_merge_across_files_and_projects(self):
         self.only([row("a", "2026-01-03T01:00:00Z", "shared")], "alpha/a.jsonl")
         self.fixture.write_transcript("beta/b.jsonl", [row("b", "2026-01-03T04:00:00Z", "shared")])
         data = self.run_build()
         self.assertEqual(data["totals"]["sessions"], 11)
-        self.assertEqual(data["totals"]["longest"], 10800)
-        self.assertEqual(data["sessions"], [[self.build.epoch("2026-01-03T01:00:00Z"),
-                                            self.build.epoch("2026-01-03T04:00:00Z")]])
 
     def test_cross_file_response_dedup_uses_componentwise_max_in_either_order(self):
         a = self.only([row("a", "2026-01-03T01:00:00Z", kind="assistant", counts=(10, 2, 30, 4),
@@ -259,7 +256,7 @@ class AggregationTests(BuildCase):
                 else:
                     stats.write_text(content, encoding="utf-8")
                 data = self.run_build()
-                self.assertEqual(data["totals"], {"messages": 13, "sessions": 4, "longest": 10800})
+                self.assertEqual(data["totals"], {"messages": 13, "sessions": 4})
                 self.assertEqual(data["models"][MODEL], [1019, 1025, 1041, 1047])
                 self.assertTrue(all(d["sp"] is not None for d in data["days"].values()))
 
@@ -269,8 +266,8 @@ class AggregationTests(BuildCase):
         data = self.run_build()
         for name in ("days", "hours", "models"):
             self.assertEqual(data[name], {})
-        self.assertEqual(data["totals"], {"messages": 0, "sessions": 0, "longest": 0})
-        self.assertEqual(data["sessions"], [])
+        self.assertEqual(data["totals"], {"messages": 0, "sessions": 0})
+        self.assertEqual(data["tasks"], {})
         dt.datetime.fromisoformat(data["generatedAt"])
         dt.datetime.strptime(data["today"], "%Y-%m-%d")
 
@@ -287,7 +284,7 @@ class AggregationTests(BuildCase):
         self.assertEqual(data["days"]["2026-01-01"], {"m": 3, "tm": {MODEL: 12}, "sp": None, "sc": 2})
         self.assertIsNone(data["days"]["2026-01-02"]["sp"])
         self.assertEqual(data["models"][MODEL], [12, 0, 0, 0])
-        self.assertEqual(data["totals"], {"messages": 0, "sessions": 0, "longest": 0})
+        self.assertEqual(data["totals"], {"messages": 0, "sessions": 0})
 
     def test_stats_without_last_computed_date_does_not_exclude_transcripts(self):
         self.fixture.stats.pop("lastComputedDate")
@@ -303,7 +300,7 @@ class AggregationTests(BuildCase):
         self.assertTrue(html.endswith(after))
         payload = html[len(before):-len(after)]
         self.assertEqual(set(json.loads(payload)),
-                         {"generatedAt", "today", "days", "hours", "models", "totals", "sessions"})
+                         {"generatedAt", "today", "days", "hours", "models", "totals", "tasks"})
 
     def test_command_line_build_uses_config_override_and_script_relative_output(self):
         result = subprocess.run([sys.executable, str(self.fixture.app / "build.py")],
@@ -336,6 +333,79 @@ class CacheTests(BuildCase):
             data = self.run_build()
         self.assertEqual({call.args[0] for call in parse.call_args_list}, {str(self.fixture.recent), str(added)})
         self.assertEqual(data["totals"]["messages"], 112)
+
+    def test_longest_task_runs_from_prompt_to_last_row_and_ignores_idle_gaps(self):
+        def text(uuid, ts, content):
+            return {**row(uuid, ts, "task"), "message": {"content": content}}
+        result = [{"type": "tool_result", "content": "ok"}]
+        path = self.fixture.write_transcript("task/a.jsonl", [
+            text("p1", "2026-01-03T01:00:00Z", "first"),
+            row("a1", "2026-01-03T01:10:00Z", "task", "assistant"),
+            text("r1", "2026-01-03T01:20:00Z", result),
+            row("a2", "2026-01-03T01:40:00Z", "task", "assistant"),
+            text("p2", "2026-01-03T02:00:00Z", "second"),
+            row("a3", "2026-01-03T02:05:00Z", "task", "assistant"),
+            row("a4", "2026-01-03T09:00:00Z", "task", "assistant"),
+        ])
+        start, last, best = self.build.parse(str(path))["k"]["task"]
+        self.assertEqual(max(best.values()), 2400)
+        self.assertEqual(last - start, 0)
+
+    def test_notes_added_by_claude_code_do_not_start_a_task(self):
+        def text(uuid, ts, **extra):
+            return {**row(uuid, ts, "notes", **extra), "message": {"content": "note"}}
+        self.only([text("a", "2026-01-03T01:00:00Z"), text("b", "2026-01-03T01:10:00Z", isMeta=True),
+                   text("c", "2026-01-03T01:20:00Z", isCompactSummary=True)])
+        self.assertEqual(list(self.run_build()["tasks"].values()), [1200])
+
+    def test_a_task_past_midnight_stays_on_the_day_it_started(self):
+        def text(uuid, stamp):
+            return {**row(uuid, stamp, "late"), "message": {"content": "go"}}
+        # 23:50 to 00:10 in the fixed local time of run_build, UTC-5.
+        self.only([text("a", "2026-01-04T04:50:00Z"), row("b", "2026-01-04T05:10:00Z", "late"),
+                   text("c", "2026-01-04T05:15:00Z")])
+        self.assertEqual(self.run_build()["tasks"], {"2026-01-03": 1200})
+
+    def test_a_gap_over_thirty_minutes_ends_a_task(self):
+        self.only([row("a", "2026-01-03T01:00:00Z", "gap"), row("b", "2026-01-03T01:29:00Z", "gap"),
+                   row("c", "2026-01-03T02:00:00Z", "gap"), row("d", "2026-01-03T02:05:00Z", "gap")])
+        self.assertEqual(list(self.run_build()["tasks"].values()), [1740])
+
+    def test_longest_tasks_keeps_the_best_of_a_day_across_sessions(self):
+        start = self.build.epoch("2026-01-03T12:00:00Z")
+        entries = [{"k": {"a": [start, start + 500, {}]}}, {"k": {"b": [start, start + 200, {}]}}]
+        self.assertEqual(list(self.build.longest_tasks(entries).values()), [500])
+
+    def test_a_grown_transcript_is_resumed_not_read_again(self):
+        path = self.only([row("a", "2026-01-03T01:00:00Z", "grow")])
+        self.run_build()
+        self.write_rows(path, [row("b", "2026-01-03T01:01:00Z", "grow")])
+        with mock.patch.object(self.build, "parse", wraps=self.build.parse) as parse:
+            self.run_build()
+        self.assertIsNotNone(parse.call_args.args[1])
+
+    def test_a_grown_file_from_an_older_cache_is_read_from_the_start(self):
+        path = self.only([row("a", "2026-01-03T01:00:00Z", "grow")])
+        self.run_build()
+        cache = json.loads(Path(self.build.CACHE).read_text(encoding="utf-8"))
+        for entry in cache["files"].values():
+            del entry["k"]
+        Path(self.build.CACHE).write_text(json.dumps(cache), encoding="utf-8")
+        self.write_rows(path, [row("b", "2026-01-03T01:01:00Z", "grow")])
+        self.assertEqual(list(self.run_build()["tasks"].values()), [60])
+
+    def test_old_cache_entries_are_reparsed_once_for_tasks(self):
+        self.run_build()
+        cache = json.loads(Path(self.build.CACHE).read_text(encoding="utf-8"))
+        for entry in cache["files"].values():
+            del entry["k"]
+        Path(self.build.CACHE).write_text(json.dumps(cache), encoding="utf-8")
+        with mock.patch.object(self.build, "parse", wraps=self.build.parse) as parse:
+            self.run_build()
+        self.assertEqual(parse.call_count, len(cache["files"]))
+        with mock.patch.object(self.build, "parse", wraps=self.build.parse) as parse:
+            self.run_build()
+        parse.assert_not_called()
 
     def write_rows(self, path, rows, mode="a"):
         with Path(path).open(mode, encoding="utf-8") as stream:
@@ -409,7 +479,7 @@ class CacheTests(BuildCase):
         self.fixture.clear_transcripts()
         with mock.patch.object(self.build, "parse", side_effect=AssertionError("deleted file parsed")):
             second = self.run_build()
-        for key in ("days", "hours", "models", "totals", "sessions"):
+        for key in ("days", "hours", "models", "totals", "tasks"):
             self.assertEqual(first[key], second[key])
         self.assertEqual(len(self.cache()["files"]), 4)
 

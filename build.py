@@ -23,6 +23,7 @@ OUT = os.path.join(HERE, "index.html")
 TEMPLATE = os.path.join(HERE, "template.html")
 CACHE_VERSION = 3
 TAIL = 256  # bytes kept to check that a transcript was appended to, not rewritten
+IDLE = 1800  # a gap this long ends a task: waiting on the user, or the computer slept
 
 
 def epoch(ts):
@@ -44,21 +45,53 @@ def resume_point(f, held):
     """Where a grown transcript can be picked up, or 0 if its known bytes are not still there."""
     offset = (held or {}).get("offset", 0)
     tail = bytes.fromhex((held or {}).get("tail", ""))
-    if not offset or offset < len(tail):
+    if not offset or offset < len(tail) or "k" not in held:
         return 0
     f.seek(offset - len(tail))
     return offset if f.read(len(tail)) == tail else 0
 
 
+def is_prompt(row):
+    """A message the user typed, not a tool result or something Claude Code added."""
+    if row.get("type") != "user" or row.get("isMeta") or row.get("isCompactSummary"):
+        return False
+    content = (row.get("message") or {}).get("content")
+    if isinstance(content, list):
+        return any(isinstance(b, dict) and b.get("type") != "tool_result" for b in content)
+    return bool(content)
+
+
+def track_task(tasks, session, t, starts):
+    """Per session [start, last, best per local day]. A task runs from its start to its
+    last row, and a gap of IDLE seconds ends it early."""
+    task = tasks.setdefault(session, [t, t, {}])
+    if starts or t - task[1] > IDLE:
+        key = local_day(task[0])
+        task[2][key] = max(task[2].get(key, 0), task[1] - task[0])
+        task[:2] = [t, t]
+    task[1] = t
+
+
+def longest_tasks(entries):
+    longest = {}
+    for entry in entries:
+        for start, last, best in entry.get("k", {}).values():
+            for key, seconds in [*best.items(), (local_day(start), last - start)]:
+                if seconds:
+                    longest[key] = max(longest.get(key, 0), seconds)
+    return longest
+
+
 def parse(path, held=None):
-    """replies: one per API response; rows: user/assistant rows by uuid; spans: session first/last.
+    """replies: one per API response; rows: user/assistant rows by uuid; spans: session first/last;
+    tasks: see track_task, where a task starts at a prompt.
 
     Transcripts only grow and can reach hundreds of MB, so with a held entry for a grown
     file only the new bytes are read. A last line without its newline is read again next time.
     """
     with open(path, "rb") as f:
         offset = resume_point(f, held)
-        replies, rows, spans = (held["r"], held["w"], held["s"]) if offset else ({}, {}, {})
+        replies, rows, spans, tasks = (held["r"], held["w"], held["s"], held["k"]) if offset else ({}, {}, {}, {})
         f.seek(offset)
         for raw in f:
             if raw.endswith(b"\n"):
@@ -71,6 +104,7 @@ def parse(path, held=None):
                 if not ts or not session or kind not in ("user", "assistant"):
                     continue
                 t = epoch(ts)
+                prompt = is_prompt(row)
                 message = row.get("message") or {}
                 usage = message.get("usage") if kind == "assistant" else None
             except (ValueError, AttributeError, TypeError):
@@ -79,6 +113,7 @@ def parse(path, held=None):
             if not side:
                 lo, hi = spans.get(session, (t, t))
                 spans[session] = (min(lo, t), max(hi, t))
+                track_task(tasks, session, t, prompt)
             if row.get("uuid") and not row.get("isMeta"):
                 rows[row["uuid"]] = [t, session, side]
             if usage:
@@ -95,7 +130,7 @@ def parse(path, held=None):
                 else:
                     replies[key] = [t, session, side, model, *counts]
         end = mark(f, offset)
-    return {"r": replies, "w": rows, "s": {k: list(v) for k, v in spans.items()}, **end}
+    return {"r": replies, "w": rows, "s": {k: list(v) for k, v in spans.items()}, "k": tasks, **end}
 
 
 def load_json(path, default):
@@ -139,7 +174,7 @@ def refresh(files, paths, parser):
             continue
         stamp = [st.st_size, st.st_mtime_ns]
         held = files.get(path)
-        if held and held.get("stamp") == stamp:
+        if held and held.get("stamp") == stamp and "k" in held:
             continue
         grew = held and held["stamp"][0] < st.st_size
         try:
@@ -181,7 +216,7 @@ def main():
         return days.setdefault(key, {"m": 0, "tm": {}, "sp": [0, 0, 0, 0], "split": True, "sc": 0})
 
     all_models = {}
-    totals = {"sessions": 0, "messages": 0, "longest": 0.0}
+    totals = {"sessions": 0, "messages": 0}
 
     # History up to the moment stats-cache.json was written.
     if stats:
@@ -200,7 +235,6 @@ def main():
                                  u.get("cacheCreationInputTokens", 0), u.get("cacheReadInputTokens", 0)]
         totals["sessions"] = stats.get("totalSessions", 0)
         totals["messages"] = stats.get("totalMessages", 0)
-        totals["longest"] = (stats.get("longestSession") or {}).get("duration", 0) / 1000
 
     # Everything after it, from transcripts.
     for t, session, side, model, i, o, cw, cr in replies.values():
@@ -222,7 +256,6 @@ def main():
         if lo >= cutoff:
             day(local_day(lo))["sc"] += 1
             totals["sessions"] += 1
-        totals["longest"] = max(totals["longest"], hi - lo)
 
     # Hours of day from every transcript row seen (history included), for peak hour.
     hours = {}
@@ -243,7 +276,7 @@ def main():
         "hours": hours,
         "models": all_models,
         "totals": totals,
-        "sessions": [[lo, hi] for lo, hi in spans.values()],
+        "tasks": longest_tasks(files.values()),
     }
 
     write_atomically(CACHE, json.dumps(cache, separators=(",", ":")))
