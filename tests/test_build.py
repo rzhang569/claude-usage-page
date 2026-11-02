@@ -1,6 +1,7 @@
 """Parsing, aggregation, incremental rebuilds, and atomic output contracts."""
 import contextlib
 import datetime as dt
+import getpass
 import io
 import json
 import os
@@ -299,8 +300,9 @@ class AggregationTests(BuildCase):
         self.assertTrue(html.startswith(before))
         self.assertTrue(html.endswith(after))
         payload = html[len(before):-len(after)]
+        self.assertEqual(json.loads(payload)["user"], getpass.getuser())
         self.assertEqual(set(json.loads(payload)),
-                         {"generatedAt", "today", "days", "hours", "models", "totals", "tasks"})
+                         {"generatedAt", "today", "user", "days", "hours", "models", "totals", "tasks"})
 
     def test_command_line_build_uses_config_override_and_script_relative_output(self):
         result = subprocess.run([sys.executable, str(self.fixture.app / "build.py")],

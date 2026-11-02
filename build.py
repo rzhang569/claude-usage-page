@@ -9,6 +9,7 @@ written next to this script. Nothing leaves the computer; deleting this folder
 removes everything.
 """
 import datetime as dt
+import getpass
 import glob
 import json
 import os
@@ -272,6 +273,7 @@ def main():
     data = {
         "generatedAt": dt.datetime.now().isoformat(timespec="seconds"),
         "today": dt.datetime.now().strftime("%Y-%m-%d"),
+        "user": getpass.getuser(),
         "days": days,
         "hours": hours,
         "models": all_models,

@@ -1,0 +1,93 @@
+"""What the page's own script draws, run in Node against a stand-in for the browser."""
+import html
+import json
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+HARNESS = ROOT / "tests" / "page_harness.js"
+OPUS, SONNET = "claude-opus-5-5", "claude-sonnet-5-5"
+
+
+def data(**changes):
+    # Thursday 2026-01-01, so Friday and Saturday of this week are future cells on the heatmap.
+    return {
+        "generatedAt": "2026-01-03T12:00:00", "today": "2026-01-01", "user": "demo",
+        "days": {
+            "2025-12-30": {"m": 5, "tm": {OPUS: 1000}, "sp": [100, 100, 300, 500], "sc": 1},
+            "2025-12-31": {"m": 7, "tm": {OPUS: 2000}, "sp": [200, 200, 600, 1000], "sc": 1},
+            "2026-01-01": {"m": 12, "tm": {OPUS: 3000, SONNET: 1}, "sp": [300, 300, 900, 1501], "sc": 2},
+            "2025-11-01": {"m": 3, "tm": {OPUS: 500}, "sp": [50, 50, 150, 250], "sc": 1},
+        },
+        "hours": {"2026-01-01": [0] * 18 + [4] + [0] * 5},
+        "models": {OPUS: [650, 650, 1950, 3250], SONNET: [0, 0, 0, 1]},
+        "totals": {"sessions": 5, "messages": 27},
+        "tasks": {"2025-11-01": 5400, "2026-01-01": 3599},
+        **changes,
+    }
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node to run the page's script")
+class PageTests(unittest.TestCase):
+    def page(self, payload=None, language="en-US", storage=None, search="", clicks=()):
+        template = (ROOT / "template.html").read_text(encoding="utf-8")
+        page = template.replace("/*__DATA__*/null", json.dumps(payload or data()))
+        run = subprocess.run(["node", str(HARNESS)], capture_output=True, text=True, timeout=30, encoding="utf-8",
+                             input=json.dumps({"html": page, "language": language, "storage": storage,
+                                               "search": search, "clicks": list(clicks)}))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout)
+
+    def tiles(self, result):
+        found = {}
+        for box in ("tiles", "meta"):
+            for key, value in re.findall(r'class="k">(.*?)</div><div class="v"[^>]*>(.*?)</div>',
+                                         result["elements"][box]["html"]):
+                found[key] = html.unescape(value)
+        return found
+
+    def stats(self, result):
+        return re.findall(r'class="v">(.*?)</div><div class="k">(.*?)</div>', result["elements"]["stats"]["html"])
+
+    def tips(self, result, box):
+        return [html.unescape(t) for t in re.findall(r'data-tip="(.*?)"', result["elements"][box]["html"])]
+
+    def test_longest_task_follows_the_range_and_rounds_to_the_minute(self):
+        self.assertEqual(self.tiles(self.page())["Longest task"], "1h 30m")
+        self.assertEqual(self.tiles(self.page(clicks=[("ranges", {"range": "7"})]))["Longest task"], "1h 0m")
+
+    def test_profile_follows_the_system_language(self):
+        chinese = self.page(data(models={OPUS: [2480000000, 0, 0, 0]},
+                                 days={"2026-01-01": {"m": 1, "tm": {OPUS: 2480000000}, "sp": None, "sc": 1}}),
+                            language="zh-CN", clicks=[("styles", {"style": "profile"})])
+        self.assertEqual(self.stats(chinese)[0], ("24.8亿", "累计 Token 数"))
+        self.assertIn("更新于", chinese["elements"]["pfoot"]["text"])
+        english = self.page(language="fr-FR", clicks=[("styles", {"style": "profile"})])
+        self.assertEqual(self.stats(english)[3], ("3 days", "Longest streak"))
+        self.assertIn("Updated", english["elements"]["pfoot"]["text"])
+
+    def test_profile_daily_tips_stop_today(self):
+        self.assertEqual(self.tips(self.page(storage={"cu.style": "profile"}), "year")[-1], "Jan 1: 3.0k tokens")
+
+    def test_profile_weekly_and_cumulative_tips(self):
+        weekly = self.page(storage={"cu.style": "profile", "cu.mode": "weekly"})
+        self.assertEqual(self.tips(weekly, "year")[-1], "Week of Dec 28: 6.0k tokens")
+        total = self.page(storage={"cu.style": "profile", "cu.mode": "total"})
+        self.assertEqual(self.tips(total, "year")[-1], "Through Jan 1: 6.5k tokens")
+
+    def test_profile_translates_its_mode_labels_and_marks_the_chosen_one(self):
+        result = self.page(language="zh-TW", storage={"cu.style": "profile"}, clicks=[("modes", {"mode": "weekly"})])
+        self.assertEqual(result["elements"]["selector:[data-mode=total]"]["text"], "累计总量")
+        self.assertEqual(result["pressed"]["modes"], {"daily": False, "weekly": True, "total": False})
+
+    def test_profile_total_matches_classic_when_history_is_partial(self):
+        payload = data(models={OPUS: [10000, 0, 0, 0]})
+        self.assertEqual(self.tiles(self.page(payload))["Total tokens"], "10.0k")
+        self.assertEqual(self.stats(self.page(payload, storage={"cu.style": "profile"}))[0][0], "10.0k")
+
+
+if __name__ == "__main__":
+    unittest.main()

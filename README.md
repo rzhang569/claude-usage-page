@@ -15,6 +15,7 @@ Unofficial; not affiliated with Anthropic.
 
 - **Overview**: sessions, messages, total tokens, active days, peak hour, favorite model, longest and current streak, longest task, most active day, a 26-week heatmap and the input / output / cache split.
 - **Models**: tokens per day stacked by model, and a table with each model's share and token types.
+- **Classic and Profile**: the card above, or a profile page with five totals and a year of daily, weekly or cumulative tokens. Profile follows your browser's language.
 - All / 30d / 7d ranges. Hover anything for exact values.
 - **Longest task** runs from a message you send to the end of the reply. A gap over 30 minutes ends it, so a sleeping computer doesn't count.
 
@@ -87,7 +88,7 @@ Run the standard-library-only test suite from the repository root:
 python3 -m unittest -v
 ```
 
-Tests generate fake Claude data and application copies in temporary directories, set `CLAUDE_CONFIG_DIR` there, and start server subprocesses on free localhost ports. They do not use or modify your real Claude data or installed usage page.
+Tests generate fake Claude data and application copies in temporary directories, set `CLAUDE_CONFIG_DIR` there, and start server subprocesses on free localhost ports. They do not use or modify your real Claude data or installed usage page. The tests of the page's own script need Node and are skipped without it.
 
 ## License
 

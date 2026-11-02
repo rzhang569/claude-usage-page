@@ -14,6 +14,7 @@
     --ink: #262019;
     --muted: #776b5d;
     --accent: #d97757;
+    --tip: #262019;
     --h0: #e4dccd;
     --h1: #efb08e;
     --h2: #e58a5f;
@@ -26,7 +27,7 @@
   main { max-width: 860px; margin: 40px auto; padding: 0 20px; }
   h1 { font-size: 22px; font-weight: 600; margin: 0 0 16px; letter-spacing: -0.01em; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
-  .bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; }
+  .bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; }
   .seg { display: inline-flex; gap: 2px; background: var(--tile); border-radius: 9px; padding: 3px; }
   .seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 500;
     padding: 5px 11px; border-radius: 7px; cursor: pointer; }
@@ -60,19 +61,70 @@
   th { color: var(--muted); font-weight: 500; font-size: 13px; }
   .tablewrap { overflow-x: auto; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
-  #tip { position: fixed; z-index: 10; pointer-events: none; background: var(--ink); color: #faf8f3;
+  #tip { position: fixed; z-index: 10; pointer-events: none; background: var(--tip); color: #faf8f3;
     font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+  .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .top h1 { margin: 0; }
+  html.profile { --ground: #171717; --card: #2b2b2b; --tile: #2b2b2b; --line: #333; --ink: #f4f4f4; --muted: #8f8f8f;
+    --tip: #3a3a3a; --h0: #2f2f2f; --h1: #16356b; --h2: #1f4f9c; --h3: #3b82f6; --h4: #7cb4f7; }
+  #profile { padding-top: 12px; }
+  .who { text-align: center; }
+  .avatar { width: 112px; height: 112px; margin: 0 auto 16px; border-radius: 50%; background: #98a6a6; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 42px; }
+  .who .name { font-size: 24px; font-weight: 600; }
+  .who .handle { color: var(--muted); margin-top: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 32px; padding: 12px 0;
+    border: 1px solid var(--line); border-radius: 16px; }
+  .stat { text-align: center; padding: 2px 8px; border-left: 1px solid var(--line); min-width: 0; }
+  .stat:first-child { border-left: 0; }
+  .stat .v { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .stat .k { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .act { display: flex; justify-content: space-between; align-items: center; margin: 36px 0 12px; gap: 12px; }
+  .act h2 { font-size: 15px; font-weight: 500; margin: 0; }
+  .modes button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; padding: 2px 6px; cursor: pointer; }
+  .modes button[aria-pressed="true"] { color: var(--ink); }
+  .year { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, auto); grid-auto-columns: 1fr; gap: 3px; }
+  .year .cell { border-radius: 3px; }
+  .months { display: grid; grid-template-columns: repeat(53, 1fr); gap: 3px; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .months span { white-space: nowrap; overflow: visible; width: 0; }
   [hidden] { display: none !important; }
   @media (max-width: 640px) {
     .tiles { grid-template-columns: repeat(2, 1fr); }
     .meta { grid-template-columns: repeat(2, 1fr); }
+    .stats { grid-template-columns: repeat(2, 1fr); row-gap: 14px; }
+    .stat { border-left: 0; }
   }
 </style>
 </head>
 <body>
 <main>
-  <h1>Claude Code usage</h1>
-  <div class="card">
+  <div class="top">
+    <h1 id="title">Claude Code usage</h1>
+    <div class="seg" id="styles">
+      <button data-style="card">Classic</button>
+      <button data-style="profile">Profile</button>
+    </div>
+  </div>
+  <section id="profile" hidden>
+    <div class="who">
+      <div class="avatar" id="avatar"></div>
+      <div class="name" id="pname"></div>
+      <div class="handle" id="phandle"></div>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="act">
+      <h2 id="acttitle">Token activity</h2>
+      <div class="modes" id="modes">
+        <button data-mode="daily">Daily</button>
+        <button data-mode="weekly">Weekly</button>
+        <button data-mode="total">Cumulative</button>
+      </div>
+    </div>
+    <div class="year" id="year"></div>
+    <div class="months" id="months"></div>
+    <div class="foot" id="pfoot"></div>
+  </section>
+  <div class="card" id="cardview">
     <div class="bar">
       <div class="seg" id="tabs">
         <button data-tab="overview">Overview</button>
@@ -119,6 +171,8 @@ const pick = (k, d) => { try { return localStorage.getItem(k) || d; } catch { re
 const keep = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 let tab = pick("cu.tab", "overview");
 let range = pick("cu.range", "all");
+let style = pick("cu.style", "card");
+let mode = pick("cu.mode", "daily");
 
 const fmt = n => {
   const units = [[1e9, "b"], [1e6, "m"], [1e3, "k"]];
@@ -143,6 +197,11 @@ function duration(sec) {
   return (d ? d + "d " : "") + (d || h ? h + "h " : "") + m + "m";
 }
 
+function quartiles(values) {
+  const seen = values.filter(Boolean).sort((a, b) => a - b);
+  return [0.25, 0.5, 0.75].map(p => seen.length ? seen[Math.floor(p * seen.length)] : 0);
+}
+
 function hourLabel(h) {
   const suffix = h < 12 ? "AM" : "PM";
   return (h % 12 || 12) + " " + suffix;
@@ -163,10 +222,8 @@ const RATIO = Object.fromEntries(Object.entries(DATA.models).map(([m, c]) => {
   const t = sum(c) || 1; return [m, c.map(v => v / t)];
 }));
 // One color per model for every range, ranked by all-time tokens.
-const COLOR = {};
-Object.entries(DATA.models).map(([m, c]) => [modelName(m), sum(c)])
-  .sort((a, b) => b[1] - a[1])
-  .forEach(([n], i) => { if (!(n in COLOR)) COLOR[n] = PALETTE[Object.keys(COLOR).length % PALETTE.length]; });
+const RANKED = [...new Set(Object.entries(DATA.models).map(([m, c]) => [modelName(m), sum(c)])
+  .sort((a, b) => b[1] - a[1]).map(([n]) => n))];
 
 function splitOf(m, v) {
   const r = RATIO[m] || [0, 0, 0, 1];
@@ -206,6 +263,7 @@ function compute() {
   for (const c of Object.values(models)) c.forEach((v, i) => tok[i] += v);
   const total = sum(tok);
   const span = Math.round((today - w.start) / 86400000) + 1;
+
   const active = new Set(keys);
 
   let longest = 0, run = 0;
@@ -242,9 +300,7 @@ function drawOverview(s) {
     tile("Longest task", s.longestTask ? duration(s.longestTask) : "—") +
     tile("Most active day", busy);
 
-  const counts = allDates.map(k => DATA.days[k].m).filter(Boolean).sort((a, b) => a - b);
-  const q = p => counts.length ? counts[Math.min(counts.length - 1, Math.floor(p * counts.length))] : 0;
-  const cut = [q(0.25), q(0.5), q(0.75)];
+  const cut = quartiles(allDates.map(k => DATA.days[k].m));
   const weeks = 26;
   const end = addDays(today, 6 - today.getDay());
   const start = addDays(end, -(weeks * 7 - 1));
@@ -257,7 +313,7 @@ function drawOverview(s) {
     const out = d > today ? " out" : "";
     const dim = (k < w.startKey && n) ? ' style="opacity:.35"' : "";
     const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ": " + group(n) + " messages";
-    cells += `<div class="cell ${lvl}${out}" data-tip="${label}"${dim}></div>`;
+    cells += `<div class="cell ${lvl}${out}"" data-tip="${label}"${dim}></div>`;
   }
   document.getElementById("heat").innerHTML = cells;
 
@@ -271,7 +327,7 @@ function drawOverview(s) {
 
 function drawModels(s) {
   const names = Object.keys(s.models).sort((a, b) => sum(s.models[b]) - sum(s.models[a]));
-  const color = COLOR;
+  const color = Object.fromEntries(RANKED.map((n, i) => [n, PALETTE[i % PALETTE.length]]));
   document.getElementById("keys").innerHTML = names.map(n => `<span style="--c:${color[n]}">${n}</span>`).join("");
 
   const days = [];
@@ -316,7 +372,106 @@ function drawModels(s) {
     }).join("");
 }
 
+const dayTokens = k => DATA.days[k] ? sum(Object.values(DATA.days[k].tm)) : 0;
+const active = k => !!DATA.days[k] && DATA.days[k].m + dayTokens(k) > 0;
+
+function streaks() {
+  let longest = 0, run = 0, prev = null;
+  for (const k of allDates.filter(active)) {
+    run = prev && Math.round((parse(k) - prev) / 86400000) === 1 ? run + 1 : 1;
+    longest = Math.max(longest, run);
+    prev = parse(k);
+  }
+  let current = 0;
+  let d = active(iso(today)) ? today : addDays(today, -1);
+  while (active(iso(d))) { current++; d = addDays(d, -1); }
+  return { longest, current };
+}
+
+const shortDate = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+// The Classic view stays in English like the original card; Profile follows the system language.
+const ZH = /^zh/i.test(navigator.language || "");
+const P = ZH ? {
+  total: "累计 Token 数", peak: "Token 单日峰值", task: "最长任务用时", longest: "最长连续天数", current: "当前连续天数",
+  activity: "Token 活动", daily: "每天", weekly: "每周", cumulative: "累计总量",
+  days: n => n + " 天", tokens: v => v + " Token",
+  date: d => `${d.getMonth() + 1}月${d.getDate()}日`, month: d => `${d.getMonth() + 1}月`,
+  week: s => `${s} 当周`, through: s => `截至 ${s}`,
+  duration: sec => { const mins = Math.round(sec / 60), h = Math.floor(mins / 60); return (h ? h + " 小时 " : "") + mins % 60 + " 分"; },
+  amount: n => n >= 1e8 ? (n / 1e8).toFixed(1) + "亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + "万" : String(Math.round(n)),
+  updated: s => `更新于 ${s} · 仅统计这台电脑的 Claude Code 记录`,
+  stamp: d => `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+} : {
+  total: "Total tokens", peak: "Peak day", task: "Longest task", longest: "Longest streak", current: "Current streak",
+  activity: "Token activity", daily: "Daily", weekly: "Weekly", cumulative: "Cumulative",
+  days: n => n + (n === 1 ? " day" : " days"), tokens: v => v + " tokens",
+  date: shortDate, month: d => d.toLocaleDateString("en-US", { month: "short" }),
+  week: s => `Week of ${s}`, through: s => `Through ${s}`,
+  duration, amount: fmt,
+  updated: s => `Updated ${s} · from this computer's Claude Code history only`,
+  stamp: d => d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+};
+
+function drawProfile() {
+  const name = DATA.user || "you";
+  document.getElementById("acttitle").textContent = P.activity;
+  for (const [m, key] of [["daily", "daily"], ["weekly", "weekly"], ["total", "cumulative"]])
+    document.querySelector(`[data-mode=${m}]`).textContent = P[key];
+  document.getElementById("avatar").textContent = name.slice(0, 2).toUpperCase();
+  document.getElementById("pname").textContent = name;
+  document.getElementById("phandle").textContent = "@" + name;
+  const tokens = allDates.map(dayTokens);
+  const s = streaks();
+  const task = Math.max(0, ...Object.values(DATA.tasks));
+  document.getElementById("stats").innerHTML = [
+    [P.amount(sum(Object.values(DATA.models).map(sum))), P.total], [P.amount(Math.max(0, ...tokens)), P.peak],
+    [task ? P.duration(task) : "—", P.task], [P.days(s.longest), P.longest], [P.days(s.current), P.current],
+  ].map(([v, k]) => `<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
+
+  const end = addDays(today, 6 - today.getDay());
+  const start = addDays(end, -(53 * 7 - 1));
+  const cells = [];
+  let running = allDates.filter(k => k < iso(start)).reduce((n, k) => n + dayTokens(k), 0);
+  for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+    const k = iso(d), n = dayTokens(k);
+    running += d > today ? 0 : n;
+    cells.push({ d, k, n, running, future: d > today });
+  }
+  const week = i => cells.slice(i - i % 7, i - i % 7 + 7);
+  const value = (c, i) => mode === "daily" ? c.n : mode === "weekly" ? sum(week(i).map(x => x.n)) : c.running;
+  const label = (c, i) => mode === "daily" ? `${P.date(c.d)}: ${P.tokens(P.amount(c.n))}`
+    : mode === "weekly" ? `${P.week(P.date(week(i)[0].d))}: ${P.tokens(P.amount(value(c, i)))}`
+    : `${P.through(P.date(c.d))}: ${P.tokens(P.amount(c.running))}`;
+  const cut = quartiles(cells.map(value));
+  document.getElementById("year").innerHTML = cells.map((c, i) => {
+    const v = value(c, i);
+    const lvl = c.future ? "out" : !v ? "" : v <= cut[0] ? "l1" : v <= cut[1] ? "l2" : v <= cut[2] ? "l3" : "l4";
+    return `<div class="cell ${lvl}"${c.future ? "" : ` data-tip="${label(c, i)}"`}></div>`;
+  }).join("");
+  let months = "", last = -1;
+  for (let w = 0; w < 53; w++) {
+    const m = cells[w * 7].d.getMonth();
+    months += `<span>${m !== last && w < 51 ? P.month(cells[w * 7].d) : ""}</span>`;
+    last = m;
+  }
+  document.getElementById("months").innerHTML = months;
+}
+
 function draw() {
+  const isProfile = style === "profile";
+  document.documentElement.classList.toggle("profile", isProfile);
+  document.getElementById("profile").hidden = !isProfile;
+  document.getElementById("cardview").hidden = isProfile;
+  document.getElementById("title").hidden = isProfile;
+  document.querySelector(".top").style.justifyContent = isProfile ? "flex-end" : "";
+  document.querySelectorAll("#styles button").forEach(b => b.setAttribute("aria-pressed", b.dataset.style === style));
+  document.querySelectorAll("#modes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === mode));
+  if (isProfile) {
+    drawProfile();
+    document.getElementById("pfoot").textContent = P.updated(P.stamp(new Date(DATA.generatedAt)));
+    return;
+  }
   document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.tab === tab));
   document.querySelectorAll("#ranges button").forEach(b => b.setAttribute("aria-pressed", b.dataset.range === range));
   document.getElementById("overview").hidden = tab !== "overview";
@@ -327,12 +482,12 @@ function draw() {
   document.getElementById("foot").textContent = `Updated ${when} · from this computer's Claude Code history only`;
 }
 
-document.getElementById("tabs").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b) return; tab = b.dataset.tab; keep("cu.tab", tab); draw();
-});
-document.getElementById("ranges").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b) return; range = b.dataset.range; keep("cu.range", range); draw();
-});
+[["styles", "style", v => style = v],
+ ["modes", "mode", v => mode = v], ["tabs", "tab", v => tab = v], ["ranges", "range", v => range = v]]
+  .forEach(([id, key, set]) => document.getElementById(id).addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    set(b.dataset[key]); keep("cu." + key, b.dataset[key]); draw();
+  }));
 // Our own tooltip: shows at once, unlike the browser's built-in one.
 const tip = document.getElementById("tip");
 document.addEventListener("mousemove", e => {

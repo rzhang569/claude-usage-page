@@ -40,6 +40,7 @@ def demo_data(today):
         total_sessions += day_sessions
     return {"generatedAt": f"{today.isoformat()}T21:30:00", "today": today.isoformat(), "days": days,
             "hours": hours, "models": models, "tasks": tasks,
+            "user": "demo",
             "totals": {"sessions": total_sessions, "messages": messages}}
 
 
@@ -48,12 +49,13 @@ def main():
     data = json.dumps(demo_data(dt.date.today()), separators=(",", ":"))
     for old, new in (("/*__DATA__*/null", data),
                      ('<meta http-equiv="refresh" content="600">\n', ""),
-                     ("<h1>Claude Code usage</h1>",
-                      '<h1>Claude Code usage</h1>\n  <p style="color:var(--muted);margin:-8px 0 16px">'
+                     ('<main>\n',
+                      '<main>\n  <p style="color:var(--muted);margin:0 0 16px">'
                       'Live demo with made-up data. '
                       '<a href="https://github.com/rzhang569/claude-usage-page" style="color:var(--accent)">'
                       'Get it for your own usage</a></p>'),
-                     ("from this computer's Claude Code history only", "demo data")):
+                     ("from this computer's Claude Code history only", "demo data"),
+                     ("仅统计这台电脑的 Claude Code 记录", "演示数据")):
         assert old in html, old
         html = html.replace(old, new)
     OUT.write_text(html, encoding="utf-8")
