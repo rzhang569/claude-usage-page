@@ -62,7 +62,7 @@
   .tablewrap { overflow-x: auto; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
   #tip { position: fixed; z-index: 10; pointer-events: none; background: var(--tip); color: #faf8f3;
-    font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+    font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: pre; }
   .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
   .top h1 { margin: 0; }
   html.profile { --ground: #171717; --card: #2b2b2b; --tile: #2b2b2b; --line: #333; --ink: #f4f4f4; --muted: #8f8f8f;
@@ -160,11 +160,20 @@
 const DATA = /*__DATA__*/null;
 
 const BOOKS = [
+  ["The Little Prince", 22000],
+  ["Animal Farm", 39000],
   ["The Great Gatsby", 62000],
-  ["Nineteen Eighty-Four", 123000],
-  ["Pride and Prejudice", 160000],
-  ["Harry Potter and the Philosopher's Stone", 103000],
+  ["Harry Potter and the Philosopher’s Stone", 103000],
+  ["The Hobbit", 123000],
+  ["1984", 123000],
+  ["Pride and Prejudice", 156000],
+  ["Dune", 244000],
+  ["Moby-Dick", 268000],
+  ["A Game of Thrones", 381000],
+  ["The Lord of the Rings", 576000],
+  ["War and Peace", 730000],
 ];
+const LUCK = Math.random();
 const PALETTE = ["#d97757", "#7a3a1e", "#e3b05a", "#8a6d3b", "#5f86c9", "#a86fc4", "#6b8a3a", "#9a8f7a"];
 
 const pick = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
@@ -175,7 +184,7 @@ let style = pick("cu.style", "card");
 let mode = pick("cu.mode", "daily");
 
 const fmt = n => {
-  const units = [[1e9, "b"], [1e6, "m"], [1e3, "k"]];
+  const units = [[1e9, "B"], [1e6, "m"], [1e3, "k"]];
   for (const [u, s] of units) if (n >= u) return (n / u).toFixed(1) + s;
   return String(Math.round(n));
 };
@@ -186,7 +195,7 @@ const parse = s => { const [y, m, d] = s.split("-").map(Number); return new Date
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 
 function modelName(id) {
-  const m = /^claude-([a-z]+)((?:-\d{1,2})+)/.exec(id);
+  const m = /^claude-([a-z]+)((?:-\d{1,2}(?!\d))+)/.exec(id);
   if (!m) return id;
   const fam = m[1][0].toUpperCase() + m[1].slice(1);
   return fam + " " + m[2].slice(1).split("-").join(".");
@@ -232,7 +241,7 @@ function splitOf(m, v) {
 
 function compute() {
   const w = window_();
-  const keys = allDates.filter(k => k >= w.startKey && k <= w.endKey && DATA.days[k].m + sum(Object.values(DATA.days[k].tm)) > 0);
+  const keys = allDates.filter(k => k >= w.startKey && k <= w.endKey && active(k));
   const hours = new Array(24).fill(0), tok = [0, 0, 0, 0], models = {};
   let msgs = 0, sessions = 0, busiest = null, estimated = false;
   for (const k of keys) {
@@ -264,17 +273,7 @@ function compute() {
   const total = sum(tok);
   const span = Math.round((today - w.start) / 86400000) + 1;
 
-  const active = new Set(keys);
-
-  let longest = 0, run = 0;
-  for (let d = new Date(w.start); d <= today; d = addDays(d, 1)) {
-    run = active.has(iso(d)) ? run + 1 : 0;
-    longest = Math.max(longest, run);
-  }
-  let current = 0;
-  let d = active.has(iso(today)) || range === "all" && DATA.days[iso(today)] ? today : addDays(today, -1);
-  while (DATA.days[iso(d)]) { current++; d = addDays(d, -1); }
-
+  const { longest, current } = streaks();
   const longestTask = Math.max(0, ...Object.entries(DATA.tasks).filter(([k]) => k >= w.startKey).map(([, v]) => v));
 
   const peak = hours.indexOf(Math.max(...hours));
@@ -290,7 +289,7 @@ function drawOverview(s) {
     tile("Sessions", group(s.sessions)) +
     tile("Messages", group(s.msgs)) +
     tile("Total tokens", fmt(s.total)) +
-    tile("Active days", `${s.activeDays}/${s.span}`) +
+    tile("Active days", range === "all" ? group(s.activeDays) : `${s.activeDays}/${s.span}`) +
     tile("Peak hour", s.hasHours ? hourLabel(s.peak) : "—") +
     tile("Favorite model", s.favorite);
   const busy = s.busiest ? parse(s.busiest).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
@@ -312,21 +311,26 @@ function drawOverview(s) {
     const lvl = n === 0 ? "" : n <= cut[0] ? "l1" : n <= cut[1] ? "l2" : n <= cut[2] ? "l3" : "l4";
     const out = d > today ? " out" : "";
     const dim = (k < w.startKey && n) ? ' style="opacity:.35"' : "";
-    const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + ": " + group(n) + " messages";
-    cells += `<div class="cell ${lvl}${out}"" data-tip="${label}"${dim}></div>`;
+    const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " — " + group(n);
+    cells += `<div class="cell ${lvl}${out}"${out ? "" : ` data-tip="${label}"`}${dim}></div>`;
   }
   document.getElementById("heat").innerHTML = cells;
 
   document.getElementById("split").textContent = (s.estimated ? "≈ " : "") +
     `Input ${fmt(s.tok[0])} · Output ${fmt(s.tok[1])} · Cache read ${fmt(s.tok[3])} · Cache write ${fmt(s.tok[2])}`;
-  const book = BOOKS[today.getDate() % BOOKS.length];
-  document.getElementById("fun").textContent = s.total
-    ? `You've used ~${group(Math.round(s.total / book[1]))}× more tokens than ${book[0]}.`
-    : "";
+  const spent = s.tok[0] + s.tok[1];
+  const books = BOOKS.filter(b => spent >= b[1]);
+  const book = books[Math.floor(LUCK * books.length)];
+  const times = book ? Math.floor(spent / book[1]) : 0;
+  document.getElementById("fun").textContent = !book ? ""
+    : times >= 2 ? `You’ve used ~${group(times)}× more tokens than ${book[0]}.`
+    : `You’ve used about as many tokens as ${book[0]}.`;
 }
 
 function drawModels(s) {
-  const names = Object.keys(s.models).sort((a, b) => sum(s.models[b]) - sum(s.models[a]));
+  // Models under 0.05% of the range are noise: leftovers from a retry or a one-off test.
+  const names = Object.keys(s.models).filter(n => sum(s.models[n]) >= s.total * 0.0005)
+    .sort((a, b) => sum(s.models[b]) - sum(s.models[a]));
   const color = Object.fromEntries(RANKED.map((n, i) => [n, PALETTE[i % PALETTE.length]]));
   document.getElementById("keys").innerHTML = names.map(n => `<span style="--c:${color[n]}">${n}</span>`).join("");
 
@@ -351,7 +355,12 @@ function drawModels(s) {
       if (!v) continue;
       const h = Math.max(1, v / max * (H - 4));
       y -= h;
-      bars += `<rect x="${i * slot}" y="${y.toFixed(1)}" width="${bw}" height="${h.toFixed(1)}" rx="2" fill="${color[n]}" data-tip="${days[i]} · ${n}: ${fmt(v)}"/>`;
+      bars += `<rect x="${i * slot}" y="${y.toFixed(1)}" width="${bw}" height="${h.toFixed(1)}" rx="2" fill="${color[n]}"/>`;
+    }
+    const used = names.filter(n => o[n]);
+    if (used.length) {
+      const text = [shortDate(parse(days[i])), ...used.map(n => `${n}: ${fmt(o[n])}`)].join("&#10;");
+      bars += `<rect x="${i * slot}" y="0" width="${slot}" height="${H}" fill="transparent" data-tip="${text}"/>`;
     }
   });
   const first = parse(days[0]).toLocaleDateString("en-US", { month: "short", day: "numeric" });

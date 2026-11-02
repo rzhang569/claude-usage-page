@@ -16,7 +16,7 @@ Unofficial; not affiliated with Anthropic.
 - **Overview**: sessions, messages, total tokens, active days, peak hour, favorite model, longest and current streak, longest task, most active day, a 26-week heatmap and the input / output / cache split.
 - **Models**: tokens per day stacked by model, and a table with each model's share and token types.
 - **Classic and Profile**: the card above, or a profile page with five totals and a year of daily, weekly or cumulative tokens. Profile follows your browser's language.
-- All / 30d / 7d ranges. Hover anything for exact values.
+- All / 30d / 7d ranges. Hover anything for exact values. Streaks and the heatmap always cover your whole history.
 - **Longest task** runs from a message you send to the end of the reply. A gap over 30 minutes ends it, so a sleeping computer doesn't count.
 
 When the numbers update:

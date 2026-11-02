@@ -55,9 +55,42 @@ class PageTests(unittest.TestCase):
     def tips(self, result, box):
         return [html.unescape(t) for t in re.findall(r'data-tip="(.*?)"', result["elements"][box]["html"])]
 
+    def test_heatmap_hover_is_the_date_and_count_with_no_future_days(self):
+        tips = self.tips(self.page(), "heat")
+        self.assertEqual(tips[-1], "Jan 1 — 12")
+        self.assertIn("Dec 31 — 7", tips)
+        self.assertFalse([t for t in tips if t.startswith("Jan 2")])
+
+    def test_active_days_has_a_denominator_only_for_fixed_ranges(self):
+        self.assertEqual(self.tiles(self.page())["Active days"], "4")
+        self.assertEqual(self.tiles(self.page(clicks=[("ranges", {"range": "30"})]))["Active days"], "3/30")
+
+    def test_streaks_ignore_the_range(self):
+        for clicks in ((), [("ranges", {"range": "7"})]):
+            found = self.tiles(self.page(clicks=clicks))
+            self.assertEqual((found["Longest streak"], found["Current streak"]), ("3 days", "3 days"))
+
     def test_longest_task_follows_the_range_and_rounds_to_the_minute(self):
         self.assertEqual(self.tiles(self.page())["Longest task"], "1h 30m")
         self.assertEqual(self.tiles(self.page(clicks=[("ranges", {"range": "7"})]))["Longest task"], "1h 0m")
+
+    def test_book_line_counts_input_and_output_but_not_cache(self):
+        models = {OPUS: [20000, 10000, 0, 9000000]}
+        self.assertEqual(self.page(data(models=models))["elements"]["fun"]["text"],
+                         "You’ve used about as many tokens as The Little Prince.")
+        models = {OPUS: [50000, 0, 0, 9000000]}
+        line = self.page(data(models=models))["elements"]["fun"]["text"]
+        self.assertRegex(line, r"^You’ve used ~2× more tokens than The Little Prince\.$")
+        self.assertEqual(self.page(data(models={OPUS: [10, 0, 0, 9000000]}))["elements"]["fun"]["text"], "")
+
+    def test_models_page_hides_tiny_models_and_hover_lists_the_whole_day(self):
+        result = self.page(data(days={"2026-01-01": {"m": 1, "tm": {OPUS: 3000, SONNET: 2000}, "sp": None, "sc": 1}},
+                                models={OPUS: [3000, 0, 0, 0], SONNET: [2000, 0, 0, 0],
+                                        "claude-haiku-5-5": [1, 0, 0, 0]}),
+                           clicks=[("tabs", {"tab": "models"})])
+        self.assertIn("Opus 5.5", result["elements"]["mtable"]["html"])
+        self.assertNotIn("Haiku", result["elements"]["mtable"]["html"])
+        self.assertEqual(self.tips(result, "chart"), ["Jan 1\nOpus 5.5: 3.0k\nSonnet 5.5: 2.0k"])
 
     def test_profile_follows_the_system_language(self):
         chinese = self.page(data(models={OPUS: [2480000000, 0, 0, 0]},
@@ -87,6 +120,18 @@ class PageTests(unittest.TestCase):
         payload = data(models={OPUS: [10000, 0, 0, 0]})
         self.assertEqual(self.tiles(self.page(payload))["Total tokens"], "10.0k")
         self.assertEqual(self.stats(self.page(payload, storage={"cu.style": "profile"}))[0][0], "10.0k")
+
+    def test_a_day_with_no_activity_does_not_extend_the_current_streak(self):
+        days = data()["days"]
+        days["2025-12-31"] = {"m": 0, "tm": {}, "sp": None, "sc": 0}
+        found = self.tiles(self.page(data(days=days)))
+        self.assertEqual((found["Longest streak"], found["Current streak"]), ("1 day", "1 day"))
+
+    def test_model_names_drop_release_dates_and_keep_every_word(self):
+        cases = {"claude-opus-4-5-20251101": "Opus 4.5", "claude-sonnet-4-20250514": "Sonnet 4"}
+        for model, name in cases.items():
+            with self.subTest(model=model):
+                self.assertEqual(self.tiles(self.page(data(models={model: [1, 1, 1, 1]})))["Favorite model"], name)
 
 
 if __name__ == "__main__":
