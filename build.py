@@ -9,7 +9,8 @@ written next to this script. Nothing leaves the computer; deleting this folder
 removes everything.
 
 Codex comes from ~/.codex/sessions/**/*.jsonl, plus its state database for
-threads whose session files are gone. Only counts are read, never conversations.
+threads with no readable token rows, such as its compressed session files. Only
+counts are read, never conversations.
 """
 import datetime as dt
 import getpass
@@ -227,7 +228,7 @@ def parse_codex(path, held=None):
 
 
 def codex_threads():
-    """Rows of Codex's state database, which outlives session files it has deleted."""
+    """Rows of Codex's state database, which also covers the session files it has compressed."""
     found = glob.glob(os.path.join(CODEX, "state_*.sqlite"))
     if not found:
         return []

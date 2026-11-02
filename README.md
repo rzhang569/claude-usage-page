@@ -51,7 +51,7 @@ The page shows only the tools with history on this computer, so with just one of
 - Days, models and tasks come from `~/.codex/sessions/`, counting each API response once. Only token counts and timestamps are kept, never what was said.
 - Days are split in UTC, like OpenAI's page, so the Codex view can show a different date from the Claude Code one in the evening. Automatic approval reviews are left out too.
 - **Longest task** uses the run time Codex records for each task, the same figure as its profile page. It can be shorter than the time between start and finish, and it isn't measured the same way as Claude Code's.
-- Threads whose session files are gone come from Codex's state database. They only have a total, so it is shared over the active days in the thread's life and its input / output / cache split is estimated (marked with ≈).
+- Threads whose session files Codex has compressed, or that have no token rows, come from Codex's state database. They only have a total, so it is shared over the active days in the thread's life and its input / output / cache split is estimated (marked with ≈).
 
 ## Install
 

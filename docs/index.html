@@ -229,6 +229,7 @@ function modelName(id) {
 
 function duration(sec) {
   const mins = Math.round(sec / 60), d = Math.floor(mins / 1440), h = Math.floor(mins % 1440 / 60), m = mins % 60;
+  if (!mins) return "<1m";
   return (d ? d + "d " : "") + (d || h ? h + "h " : "") + m + "m";
 }
 
@@ -440,7 +441,10 @@ const P = ZH ? {
   days: n => n + " 天", tokens: v => v + " Token",
   date: d => `${d.getMonth() + 1}月${d.getDate()}日`, month: d => `${d.getMonth() + 1}月`,
   week: s => `${s} 当周`, through: s => `截至 ${s}`,
-  duration: sec => { const mins = Math.round(sec / 60), h = Math.floor(mins / 60); return (h ? h + " 小时 " : "") + mins % 60 + " 分"; },
+  duration: sec => {
+    const mins = Math.round(sec / 60), h = Math.floor(mins / 60);
+    return mins ? (h ? h + " 小时 " : "") + mins % 60 + " 分" : "不到 1 分";
+  },
   amount: n => n >= 1e8 ? (n / 1e8).toFixed(1) + "亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + "万" : String(Math.round(n)),
   updated: s => `更新于 ${s} · 演示数据`,
   stamp: d => `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,

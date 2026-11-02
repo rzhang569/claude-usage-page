@@ -83,6 +83,11 @@ class PageTests(unittest.TestCase):
         self.assertEqual(self.tiles(self.page())["Longest task"], "1h 30m")
         self.assertEqual(self.tiles(self.page(clicks=[("ranges", {"range": "7"})]))["Longest task"], "1h 0m")
 
+    def test_a_task_under_half_a_minute_does_not_read_as_zero(self):
+        short = data(tasks={"2026-01-01": 20})
+        self.assertEqual(self.tiles(self.page(short))["Longest task"], "<1m")
+        self.assertEqual(self.stats(self.page(short, language="zh-CN", storage={"cu.style": "profile"}))[2][0], "不到 1 分")
+
     def test_book_line_counts_input_and_output_but_not_cache(self):
         models = {OPUS: [20000, 10000, 0, 9000000]}
         self.assertEqual(self.page(data(models=models))["elements"]["fun"]["text"],
