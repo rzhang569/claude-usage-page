@@ -5,6 +5,7 @@ old, so a reload always shows the latest usage.
 Usage: python3 serve.py [port]   (default 8788)"""
 import http.server
 import os
+import socketserver
 import subprocess
 import sys
 import threading
@@ -67,6 +68,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class Server(http.server.ThreadingHTTPServer):
     request_queue_size = 64  # The default of 5 resets connections when many tabs reload at once.
+
+    def server_bind(self):
+        # The standard version looks up this computer's name first, which can stall for
+        # many seconds on some networks. Nothing here uses that name.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 Server(("127.0.0.1", PORT), Handler).serve_forever()

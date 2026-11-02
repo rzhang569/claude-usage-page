@@ -196,6 +196,12 @@ class RebuildOnLoadTests(ServerTests):
         self.assertEqual(status, 200)
         self.assertIn(b"const ALL = {", body)
 
+    def test_starting_does_not_look_up_the_computer_name(self):
+        serve = self.fixture.app / "serve.py"
+        serve.write_text("import socket\nsocket.getfqdn = None\n" + serve.read_text(encoding="utf-8"), encoding="utf-8")
+        self.stop_server(self.process)
+        self.start_server()
+
     def test_failed_build_keeps_serving_the_last_page(self):
         (self.fixture.app / "template.html").unlink()
         self.make_stale()
