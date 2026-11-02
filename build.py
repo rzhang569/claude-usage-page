@@ -34,6 +34,12 @@ def local_day(t):
     return dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d")
 
 
+def mark(f, offset):
+    """Where parsing stopped, for resume_point to check next time."""
+    f.seek(max(0, offset - TAIL))
+    return {"offset": offset, "tail": f.read(offset - f.tell()).hex()}
+
+
 def resume_point(f, held):
     """Where a grown transcript can be picked up, or 0 if its known bytes are not still there."""
     offset = (held or {}).get("offset", 0)
@@ -61,37 +67,35 @@ def parse(path, held=None):
                 continue
             try:
                 row = json.loads(raw.decode("utf-8", "ignore"))
-            except ValueError:
+                ts, kind, session = row.get("timestamp"), row.get("type"), row.get("sessionId")
+                if not ts or not session or kind not in ("user", "assistant"):
+                    continue
+                t = epoch(ts)
+                message = row.get("message") or {}
+                usage = message.get("usage") if kind == "assistant" else None
+            except (ValueError, AttributeError, TypeError):
                 continue
-            ts, kind, session = row.get("timestamp"), row.get("type"), row.get("sessionId")
-            if not ts or not session or kind not in ("user", "assistant"):
-                continue
-            t = epoch(ts)
             side = 1 if row.get("isSidechain") else 0
             if not side:
                 lo, hi = spans.get(session, (t, t))
                 spans[session] = (min(lo, t), max(hi, t))
             if row.get("uuid") and not row.get("isMeta"):
                 rows[row["uuid"]] = [t, session, side]
-            message = row.get("message") or {}
-            if kind == "assistant" and message.get("usage"):
+            if usage:
                 model = message.get("model") or "?"
                 if model == "<synthetic>":
                     continue
-                u = message["usage"]
                 key = f'{message.get("id")}|{row.get("requestId")}'
-                counts = [u.get("input_tokens") or 0, u.get("output_tokens") or 0,
-                          u.get("cache_creation_input_tokens") or 0,
-                          u.get("cache_read_input_tokens") or 0]
+                counts = [usage.get("input_tokens") or 0, usage.get("output_tokens") or 0,
+                          usage.get("cache_creation_input_tokens") or 0,
+                          usage.get("cache_read_input_tokens") or 0]
                 held = replies.get(key)
                 if held:
                     held[4:] = [max(a, b) for a, b in zip(held[4:], counts)]
                 else:
                     replies[key] = [t, session, side, model, *counts]
-        f.seek(max(0, offset - TAIL))
-        tail = f.read(offset - f.tell()).hex()
-    return {"r": replies, "w": rows, "s": {k: list(v) for k, v in spans.items()},
-            "offset": offset, "tail": tail}
+        end = mark(f, offset)
+    return {"r": replies, "w": rows, "s": {k: list(v) for k, v in spans.items()}, **end}
 
 
 def load_json(path, default):
@@ -100,6 +104,18 @@ def load_json(path, default):
             return json.load(f)
     except (OSError, ValueError):
         return default
+
+
+def write_atomically(path, text):
+    # The page server, the hourly job and /my-usage can all build at once.
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def replace(src, dst):
@@ -114,13 +130,9 @@ def replace(src, dst):
             time.sleep(0.1)
 
 
-def main():
-    cache = load_json(CACHE, {})
-    if cache.get("v") != CACHE_VERSION:
-        cache = {"v": CACHE_VERSION, "files": {}}
-    files = cache["files"]
-    # Files Claude Code has deleted stay in the cache on purpose.
-    for path in glob.glob(os.path.join(ROOT, "**", "*.jsonl"), recursive=True):
+def refresh(files, paths, parser):
+    """Parse new or changed files. Files deleted since stay in the cache on purpose."""
+    for path in paths:
         try:
             st = os.stat(path)
         except OSError:
@@ -130,7 +142,18 @@ def main():
         if held and held.get("stamp") == stamp:
             continue
         grew = held and held["stamp"][0] < st.st_size
-        files[path] = {"stamp": stamp, **parse(path, held if grew else None)}
+        try:
+            files[path] = {**parser(path, held if grew else None), "stamp": stamp}
+        except OSError:
+            continue  # Deleted or locked since the glob; the next build picks it up.
+
+
+def main():
+    cache = load_json(CACHE, {})
+    if not isinstance(cache, dict) or cache.get("v") != CACHE_VERSION or not isinstance(cache.get("files"), dict):
+        cache = {"v": CACHE_VERSION, "files": {}}
+    files = cache["files"]
+    refresh(files, glob.glob(os.path.join(ROOT, "**", "*.jsonl"), recursive=True), parse)
 
     replies, rows, spans = {}, {}, {}
     for entry in files.values():
@@ -223,17 +246,11 @@ def main():
         "sessions": [[lo, hi] for lo, hi in spans.values()],
     }
 
-    tmp = CACHE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f, separators=(",", ":"))
-    replace(tmp, CACHE)
+    write_atomically(CACHE, json.dumps(cache, separators=(",", ":")))
 
     with open(TEMPLATE, encoding="utf-8") as f:
-        html = f.read().replace("/*__DATA__*/null", json.dumps(data, separators=(",", ":")))
-    tmp = OUT + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(html)
-    replace(tmp, OUT)
+        html = f.read().replace("/*__DATA__*/null", json.dumps(data, separators=(",", ":")).replace("</", "<\\/"))
+    write_atomically(OUT, html)
     print(f"wrote {OUT}: {len(days)} days")
 
 

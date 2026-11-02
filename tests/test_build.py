@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -487,6 +488,42 @@ class IOTests(BuildCase):
         path.write_text('{"ok": [1, 2]}', encoding="utf-8")
         self.assertEqual(self.build.load_json(path, default), {"ok": [1, 2]})
 
+    def leftovers(self):
+        return list(self.fixture.app.glob("*.tmp"))
+
+    def test_builds_running_at_the_same_time_all_succeed(self):
+        for _ in range(6):
+            runs = [subprocess.Popen([sys.executable, str(self.fixture.app / "build.py")], env=self.fixture.env(),
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) for _ in range(4)]
+            for run in runs:
+                _, error = run.communicate(timeout=30)
+                self.assertEqual(run.returncode, 0, error)
+        self.assertEqual(self.cache()["v"], self.build.CACHE_VERSION)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_damaged_cache_of_any_shape_starts_over(self):
+        for content in ("[]", '{"v": %d}' % self.build.CACHE_VERSION, "null"):
+            with self.subTest(content=content):
+                Path(self.build.CACHE).write_text(content, encoding="utf-8")
+                self.assertEqual(self.run_build()["totals"]["messages"], 110)
+
+    def test_a_file_that_vanishes_mid_build_is_skipped(self):
+        real = self.build.parse
+
+        def parse(path, held=None):
+            if path.endswith("history.jsonl"):
+                raise FileNotFoundError(path)
+            return real(path, held)
+
+        with mock.patch.object(self.build, "parse", side_effect=parse):
+            self.assertGreater(self.run_build()["totals"]["messages"], 0)
+
+    def test_a_script_tag_in_a_model_name_stays_inside_the_data(self):
+        self.only([row("a", "2026-01-03T01:00:00Z", kind="assistant", counts=(1, 1, 1, 1), model="</script><b>")])
+        self.assertIn("</script><b>", self.run_build()["models"])
+        page = Path(self.build.OUT).read_text(encoding="utf-8")
+        self.assertNotIn("</script><b>", page)
+
     def test_cache_and_html_are_complete_before_atomic_replace(self):
         cache_path, out_path = Path(self.build.CACHE), Path(self.build.OUT)
         cache_path.write_text("old cache", encoding="utf-8")
@@ -495,7 +532,7 @@ class IOTests(BuildCase):
         replaced = []
 
         def inspect(src, dst):
-            self.assertEqual(src, dst + ".tmp")
+            self.assertRegex(src, re.escape(dst) + r"\.\d+\.tmp$")
             self.assertEqual(Path(src).parent, Path(dst).parent)
             text = Path(src).read_text(encoding="utf-8")
             if dst == self.build.CACHE:
@@ -512,8 +549,7 @@ class IOTests(BuildCase):
         with mock.patch.object(self.build.os, "replace", side_effect=inspect):
             self.run_build()
         self.assertEqual(replaced, [self.build.CACHE, self.build.OUT])
-        self.assertFalse(Path(self.build.CACHE + ".tmp").exists())
-        self.assertFalse(Path(self.build.OUT + ".tmp").exists())
+        self.assertEqual(self.leftovers(), [])
 
     def test_failed_cache_replace_preserves_previous_files(self):
         Path(self.build.CACHE).write_text("old cache", encoding="utf-8")
@@ -523,7 +559,7 @@ class IOTests(BuildCase):
                 self.run_build()
         self.assertEqual(Path(self.build.CACHE).read_text(encoding="utf-8"), "old cache")
         self.assertEqual(Path(self.build.OUT).read_text(encoding="utf-8"), "old page")
-        self.assertEqual(json.loads(Path(self.build.CACHE + ".tmp").read_text(encoding="utf-8"))["v"], self.build.CACHE_VERSION)
+        self.assertEqual(self.leftovers(), [])
 
     def test_failed_output_replace_preserves_previous_page(self):
         Path(self.build.OUT).write_text("old page", encoding="utf-8")
@@ -539,7 +575,7 @@ class IOTests(BuildCase):
                 self.run_build()
         self.assertEqual(Path(self.build.OUT).read_text(encoding="utf-8"), "old page")
         self.assertEqual(self.cache()["v"], self.build.CACHE_VERSION)
-        self.assertIn("const DATA = {", Path(self.build.OUT + ".tmp").read_text(encoding="utf-8"))
+        self.assertEqual(self.leftovers(), [])
 
     def test_replace_retries_permission_errors_then_succeeds(self):
         with mock.patch.object(self.build.os, "replace", side_effect=[PermissionError, PermissionError, None]) as replace, \

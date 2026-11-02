@@ -204,12 +204,15 @@ class RebuildOnLoadTests(ServerTests):
         self.assertEqual(body, self.body)
 
     def test_parallel_requests_on_a_stale_page_all_get_the_same_rebuilt_page(self):
+        build = self.fixture.app / "build.py"
+        build.write_text(build.read_text(encoding="utf-8") + '\nopen("builds.log", "a").write("built\\n")\n', encoding="utf-8")
         self.make_stale()
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             responses = list(pool.map(self.request, ["/"] * 12))
-        bodies = {body for status, _, body in responses if status == 200}
-        self.assertEqual(len(responses), 12)
+        self.assertEqual([status for status, _, _ in responses], [200] * 12)
+        bodies = {body for _, _, body in responses}
         self.assertEqual(len(bodies), 1)
+        self.assertEqual((self.fixture.app / "builds.log").read_text(encoding="utf-8").count("built"), 1)
         self.assertIn(b"const DATA = {", bodies.pop())
 
     # The inherited cases below assume the hand-written page is served untouched
