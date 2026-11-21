@@ -1,5 +1,7 @@
 index.html
 cache.json
+cache-v4.json
+*.tmp
 *.log
 .DS_Store
 __pycache__/

@@ -35,7 +35,7 @@ $pyw = Join-Path (Split-Path $py) "pythonw.exe"
 if (-not (Test-Path $pyw)) { $pyw = $py }
 
 New-Item -ItemType Directory -Force -Path $dest, $skill | Out-Null
-foreach ($f in "build.py", "serve.py", "template.html") { Copy-Item (Join-Path $src $f) $dest -Force }
+foreach ($f in "build.py", "serve.py", "template.html", "pricing.json") { Copy-Item (Join-Path $src $f) $dest -Force }
 
 & $py (Join-Path $dest "build.py")
 if ($LASTEXITCODE -ne 0) { throw "build.py failed" }

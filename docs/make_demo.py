@@ -11,6 +11,17 @@ OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "docs" / "index.html"
 MIX = {"claude-opus-5-5": 0.7, "claude-sonnet-5-5": 0.25, "claude-haiku-5-5": 0.05}
 CODEX_MIX = {"gpt-6.1-sol": 0.75, "gpt-6.1-terra": 0.25}
 SPLIT = (0.0003, 0.004, 0.04, 0.9557)  # input, output, cache write, cache read
+PRICES = json.loads((ROOT / "pricing.json").read_text(encoding="utf-8"))
+
+
+def demo_cost(name, parts):
+    """The day's made-up usage at the list prices in pricing.json (Claude cache writes as 1-hour ones)."""
+    i, o, cw, cr = parts
+    if name.startswith("claude-"):
+        r = PRICES["claude"]["models"][name]
+        return round((i * r[0] + o * r[1] + cw * r[3] + cr * r[4]) / 1e6, 4)
+    r = PRICES["openai"]["models"][name]["short"]
+    return round((i * r[0] + o * r[1] + cw * r[2] + cr * r[3]) / 1e6, 4)
 
 
 def demo_tool(today, seed, mix, activity, volume):
@@ -24,15 +35,17 @@ def demo_tool(today, seed, mix, activity, volume):
             continue
         count, day_sessions = int(rng.lognormvariate(6.2, 0.7) * volume), rng.randint(1, 6)
         tokens = count * rng.randint(70000, 140000)
-        by_model, split = {}, [0, 0, 0, 0]
+        by_model, split, cost = {}, [0, 0, 0, 0], {}
         for name, share in mix.items():
             value = int(tokens * share * rng.uniform(0.6, 1.4))
             by_model[name] = value
-            for i, part in enumerate(SPLIT):
-                models[name][i] += int(value * part)
-                split[i] += int(value * part)
+            parts = [int(value * part) for part in SPLIT]
+            cost[name] = demo_cost(name, parts)
+            for i, part in enumerate(parts):
+                models[name][i] += part
+                split[i] += part
         key = day.isoformat()
-        days[key] = {"m": count, "tm": by_model, "sp": split, "sc": day_sessions}
+        days[key] = {"m": count, "tm": by_model, "sp": split, "sc": day_sessions, "c": cost}
         hours[key] = [0] * 24
         for _ in range(count):
             hours[key][min(23, max(0, int(rng.gauss(16, 4))))] += 1
@@ -44,14 +57,17 @@ def demo_tool(today, seed, mix, activity, volume):
 
 
 def demo_data(today):
-    return {"generatedAt": f"{today.isoformat()}T21:30:00", "user": "demo", "claude": True,
+    pricing = {"reviewed": PRICES["reviewed"], "claude": PRICES["claude"]["source"], "openai": PRICES["openai"]["source"]}
+    return {"generatedAt": f"{today.isoformat()}T21:30:00", "user": "demo", "claude": True, "pricing": pricing,
             **demo_tool(today, 7, MIX, 0.85, 1),
             "codex": demo_tool(today, 11, CODEX_MIX, 0.6, 0.4)}
 
 
 def main():
     html = (ROOT / "template.html").read_text(encoding="utf-8")
-    data = json.dumps(demo_data(dt.date.today()), separators=(",", ":"))
+    # The day to draw: today, or a fixed one (YYYY-MM-DD) to rebuild a checked-in demo exactly.
+    day = dt.date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else dt.date.today()
+    data = json.dumps(demo_data(day), separators=(",", ":"))
     for old, new in (("/*__DATA__*/null", data),
                      ('<meta http-equiv="refresh" content="600">\n', ""),
                      ('<main>\n',

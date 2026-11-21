@@ -38,7 +38,7 @@ class Fixture:
         self.projects = self.config / "projects"
         self.projects.mkdir(parents=True)
         self.app.mkdir()
-        for name in ("build.py", "serve.py", "template.html"):
+        for name in ("build.py", "serve.py", "template.html", "pricing.json"):
             shutil.copyfile(REPO / name, self.app / name)
         self.stats = {
             "dailyActivity": [

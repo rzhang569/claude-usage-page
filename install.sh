@@ -25,7 +25,7 @@ PY="$(command -v python3 || true)"
 [ -n "$PY" ] || { echo "python3 not found"; exit 1; }
 
 mkdir -p "$DEST" "$AGENTS" "$SKILL" "$CODEX_SKILL"
-cp "$SRC/build.py" "$SRC/serve.py" "$SRC/template.html" "$DEST/"
+cp "$SRC/build.py" "$SRC/serve.py" "$SRC/template.html" "$SRC/pricing.json" "$DEST/"
 
 plist() { # label, interval-or-keepalive, script args...
   label=$1; mode=$2; shift 2
