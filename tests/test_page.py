@@ -147,6 +147,104 @@ class PageTests(unittest.TestCase):
         self.assertEqual(self.stats(english)[3], ("3 days", "Longest streak"))
         self.assertIn("Updated", english["elements"]["pfoot"]["text"])
 
+    def words(self, result):
+        # Everything a reader can see: element text, plus the hover tips inside the markup.
+        seen = []
+        for el in result["elements"].values():
+            if el["hidden"]:
+                continue
+            seen += [el["text"], re.sub(r"<[^>]+>", " ", el["html"])] + re.findall(r'data-tip="([^"]*)"', el["html"])
+        return html.unescape(" ".join(seen + [result["title"]]))
+
+    def test_each_view_keeps_to_one_language(self):
+        both = data(codex=CODEX)
+        for mode in ("daily", "weekly", "total"):
+            for look in ("auto", "light", "dark"):
+                chinese = self.page(both, language="zh-CN",
+                                    storage={"cu.style": "profile", "cu.mode": mode, "cu.appearance": look})
+                left = re.sub(r"Claude Code|Claude|Codex|Token|@?demo|DE", "", self.words(chinese))
+                self.assertNotRegex(left, r"[A-Za-z]{2,}", (mode, look))
+                self.assertEqual(chinese["lang"], "zh-CN")
+        labels = lambda r: [r["elements"]["selector:[data-style=%s]" % k]["text"] for k in ("card", "profile")]
+        self.assertEqual(labels(self.page(language="zh-CN", storage={"cu.style": "profile"})), ["经典", "个人主页"])
+        self.assertEqual(labels(self.page(language="zh-CN")), ["Classic", "Profile"])
+        self.assertEqual(labels(self.page(language="en-US", storage={"cu.style": "profile"})), ["Classic", "Profile"])
+        cjk = r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]"
+        for language in ("en-US", "zh-CN"):  # Classic stays English even on a Chinese system.
+            for tab in ("overview", "models"):
+                classic = self.page(both, language=language, storage={"cu.tab": tab})
+                self.assertNotRegex(self.words(classic), cjk, (language, tab))
+                self.assertEqual((classic["lang"], classic["title"]), ("en", "Claude Code Usage"))
+        english = self.page(both, language="en-US", storage={"cu.style": "profile", "cu.mode": "weekly"})
+        self.assertNotRegex(self.words(english), cjk)
+
+    def test_profile_language_button_picks_auto_english_or_chinese(self):
+        button = lambda r: r["elements"]["language"]["text"]
+        profile = {"cu.style": "profile"}
+        auto_zh = self.page(language="zh-CN", storage=profile)
+        self.assertEqual((button(auto_zh), self.stats(auto_zh)[0][1]), ("🌐\ufe0e 自动", "累计 Token 数"))
+        auto_en = self.page(language="en-US", storage=profile)
+        self.assertEqual((button(auto_en), self.stats(auto_en)[0][1]), ("🌐\ufe0e Auto", "Total tokens"))
+        english = self.page(language="zh-CN", storage={**profile, "cu.lang": "en"})
+        self.assertEqual((button(english), self.stats(english)[0][1]), ("🌐\ufe0e English", "Total tokens"))
+        self.assertEqual((english["lang"], english["title"]), ("en", "Claude Code Usage"))
+        self.assertNotRegex(self.words(english), r"[\u4e00-\u9fff]")
+        chinese = self.page(language="en-US", storage={**profile, "cu.lang": "zh"})
+        self.assertEqual((button(chinese), self.stats(chinese)[0][1]), ("🌐\ufe0e 中文", "累计 Token 数"))
+        self.assertEqual((chinese["lang"], chinese["title"]), ("zh-CN", "Claude Code 用量"))
+        unknown = self.page(language="en-US", storage={**profile, "cu.lang": "fr"})
+        self.assertEqual(button(unknown), "🌐\ufe0e Auto")
+        # Each click moves Auto -> English -> 中文 -> Auto and is remembered.
+        for clicks, stored, label in ((1, "en", "Total tokens"), (2, "zh", "累计 Token 数"), (3, "auto", "Total tokens")):
+            result = self.page(language="en-US", storage=profile, clicks=[("language", {})] * clicks)
+            self.assertEqual((result["storage"]["cu.lang"], self.stats(result)[0][1]), (stored, label), clicks)
+
+    def test_cycle_buttons_tell_screen_readers_their_setting(self):
+        said = lambda r, b: r["elements"][b]["attrs"].get("aria-label")
+        profile = {"cu.style": "profile"}
+        zh = self.page(language="zh-CN", storage=profile)
+        self.assertEqual(said(zh, "language"), "语言：自动，点击切换")
+        self.assertEqual(said(zh, "appearance"), "外观：自动，点击切换")
+        en = self.page(language="en-US", storage={**profile, "cu.lang": "en", "cu.appearance": "dark"})
+        self.assertEqual(said(en, "language"), "Language: English, click to change")
+        self.assertEqual(said(en, "appearance"), "Appearance: Dark, click to change")
+        picked = self.page(language="en-US", storage={**profile, "cu.lang": "zh"})
+        self.assertEqual(said(picked, "language"), "语言：中文，点击切换")
+        classic = self.page(language="zh-CN", storage={"cu.appearance": "light"})
+        self.assertEqual(said(classic, "appearance"), "Appearance: Light, click to change")
+        # Neither button claims to be a pressed toggle.
+        template = (ROOT / "template.html").read_text(encoding="utf-8")
+        self.assertNotRegex(template, r'id="(language|appearance)"[^>]*aria-pressed')
+        self.assertNotIn("aria-pressed", zh["elements"]["language"]["attrs"])
+
+    def test_unknown_stored_appearance_falls_back_to_auto(self):
+        for style in ("card", "profile"):
+            for value in ("system", "constructor", "toString", "__proto__"):
+                result = self.page(storage={"cu.appearance": value, "cu.style": style, "cu.lang": value})
+                self.assertEqual(result["elements"]["appearance"]["text"], "◐ Auto", (style, value))
+                self.assertEqual(result["elements"]["appearance"]["attrs"]["aria-label"],
+                                 "Appearance: Auto, click to change")
+
+    def test_classic_hides_the_language_button_and_stays_english(self):
+        classic = self.page(language="en-US", storage={"cu.lang": "zh"})
+        self.assertTrue(classic["elements"]["langseg"]["hidden"])
+        self.assertNotRegex(self.words(classic), r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")
+        self.assertFalse(self.page(storage={"cu.style": "profile"})["elements"]["langseg"]["hidden"])
+
+    def test_the_tab_title_names_the_source(self):
+        both = data(codex=CODEX)
+        for language, style, claude, codex in (("en-US", "card", "Claude Code Usage", "Codex Usage"),
+                                               ("zh-CN", "profile", "Claude Code 用量", "Codex 用量")):
+            store = {"cu.style": style}
+            self.assertEqual(self.page(both, language=language, storage=store)["title"], claude)
+            self.assertEqual(self.page(both, language=language, storage={**store, "cu.source": "codex"})["title"], codex)
+            switched = self.page(both, language=language, storage=store, clicks=[("sources", {"source": "codex"})])
+            self.assertEqual(switched["title"], codex)
+
+    def test_chinese_tips_use_a_chinese_colon(self):
+        tips = self.tips(self.page(language="zh-CN", storage={"cu.style": "profile"}), "year")
+        self.assertEqual(tips[-1], "1月1日：3001 Token")
+
     def test_profile_hides_the_theme_switch_and_ignores_the_theme(self):
         result = self.page(storage={"cu.theme": "blue", "cu.style": "profile"}, system_dark=True)
         self.assertEqual(result["classes"], ["profile"])

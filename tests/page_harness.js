@@ -10,7 +10,8 @@ function element() {
     hidden: false, innerHTML: "", textContent: "", clientWidth: 780, style: {}, dataset: {}, listeners: {},
     classes: new Set(),
     addEventListener(type, fn) { this.listeners[type] = fn; },
-    setAttribute() {},
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = String(value); },
     get classList() {
       const classes = this.classes;
       return { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) };
@@ -52,7 +53,14 @@ const sandbox = {
     documentElement: root,
     addEventListener() {},
     getElementById: byId,
-    querySelector: selector => byId("selector:" + selector),
+    querySelector: selector => {
+      // A [data-x=y] element starts with the label written in the page's markup.
+      const key = "selector:" + selector, fresh = !elements[key], el = byId(key);
+      const attr = /^\[data-(\w+)=(\w+)\]$/.exec(selector);
+      const label = fresh && attr && new RegExp(`data-${attr[1]}="${attr[2]}"[^>]*>([^<]*)<`).exec(input.html);
+      if (label) el.textContent = label[1];
+      return el;
+    },
     querySelectorAll: selector => buttons(selector),
   },
 };
@@ -65,8 +73,9 @@ for (const [id, dataset] of input.clicks || []) {
   byId(id).listeners.click({ target: { closest: () => ({ dataset }) } });
 }
 
-const out = { classes: [...root.classes], elements: {}, pressed, addressBar, storage: Object.fromEntries(store) };
+const out = { classes: [...root.classes], lang: root.lang, title: sandbox.document.title, elements: {}, pressed, addressBar,
+  storage: Object.fromEntries(store) };
 for (const [id, el] of Object.entries(elements)) {
-  out.elements[id] = { hidden: el.hidden, html: el.innerHTML, text: el.textContent };
+  out.elements[id] = { hidden: el.hidden, html: el.innerHTML, text: el.textContent, attrs: el.attrs };
 }
 console.log(JSON.stringify(out));
