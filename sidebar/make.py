@@ -30,7 +30,7 @@ def card():
 
 def extension(path):
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in ("manifest.json", "server/index.js"):
+        for name in ("manifest.json", "icon.png", "server/index.js"):
             z.write(HERE / name, name)
 
 
