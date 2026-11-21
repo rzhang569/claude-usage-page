@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="600">
-<title>Claude Usage</title>
+<title>Claude Code Usage</title>
 <style>
   :root {
     --ground: #f0ebe1;
@@ -31,7 +31,7 @@
   .seg { display: inline-flex; gap: 2px; background: var(--tile); border-radius: 9px; padding: 3px; }
   .seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 500;
     padding: 5px 11px; border-radius: 7px; cursor: pointer; }
-  .seg button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(90,45,20,.14); }
+  .seg button[aria-pressed="true"], .seg button.cycle { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(90,45,20,.14); }
   .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .tile { background: var(--tile); border-radius: 10px; padding: 10px 12px; min-width: 0; }
   .tile .k { color: var(--muted); font-size: 13px; }
@@ -114,7 +114,8 @@
         <button data-source="claude">Claude Code</button>
         <button data-source="codex">Codex</button>
       </div>
-      <div class="seg"><button id="appearance" aria-pressed="true"></button></div>
+      <div class="seg" id="langseg"><button id="language" class="cycle"></button></div>
+      <div class="seg"><button id="appearance" class="cycle"></button></div>
       <div class="seg" id="themes">
         <button data-theme="orange">Orange</button>
         <button data-theme="blue">Blue</button>
@@ -212,6 +213,9 @@ let range = pick("cu.range", "all");
 let style = pick("cu.style", "card");
 let theme = pick("cu.theme", "orange");
 let appearance = pick("cu.appearance", "auto");
+if (!Object.prototype.hasOwnProperty.call(LOOKS, appearance)) appearance = "auto";
+let language = pick("cu.lang", "auto");
+if (!["auto", "en", "zh"].includes(language)) language = "auto";
 let mode = pick("cu.mode", "daily");
 let source = new URLSearchParams(location.search).get("source") || pick("cu.source", "claude");
 if (!SOURCES[source]) source = SOURCES.claude ? "claude" : "codex";
@@ -448,9 +452,24 @@ function streaks() {
 
 const shortDate = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-// The Classic view stays in English like the original card; Profile follows the system language.
-const ZH = /^zh/i.test(navigator.language || "");
-const P = ZH ? {
+// The Classic view stays in English like the original card. Profile follows the system language
+// unless the language button picks English or Chinese.
+const SYSTEM_ZH = /^zh/i.test(navigator.language || "");
+const LANGS = { auto: "🌐\ufe0e ", en: "🌐\ufe0e English", zh: "🌐\ufe0e 中文" };
+const EN = {
+  total: "Total tokens", peak: "Peak day", task: "Longest task", longest: "Longest streak", current: "Current streak",
+  activity: "Token activity", daily: "Daily", weekly: "Weekly", cumulative: "Cumulative",
+  days: n => n + (n === 1 ? " day" : " days"), tokens: v => v + " tokens",
+  date: shortDate, month: d => d.toLocaleDateString("en-US", { month: "short" }),
+  week: s => `Week of ${s}`, through: s => `Through ${s}`,
+  duration, amount: fmt,
+  updated: s => `Updated ${s} · ${origin()}`,
+  stamp: d => d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+  looks: LOOKS, styles: { card: "Classic", profile: "Profile" }, auto: "Auto",
+  says: (what, now) => `${what}: ${now}, click to change`, language: "Language", appearance: "Appearance",
+  tip: (a, b) => `${a}: ${b}`, lang: "en", title: () => `${TOOL[source]} Usage`,
+};
+const ZH = {
   total: "累计 Token 数", peak: "Token 单日峰值", task: "最长任务用时", longest: "最长连续天数", current: "当前连续天数",
   activity: "Token 活动", daily: "每天", weekly: "每周", cumulative: "累计总量",
   days: n => n + " 天", tokens: v => v + " Token",
@@ -463,16 +482,11 @@ const P = ZH ? {
   amount: n => n >= 1e8 ? (n / 1e8).toFixed(1) + "亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + "万" : String(Math.round(n)),
   updated: s => `更新于 ${s} · 仅统计这台电脑的 ${TOOL[source]} 记录`,
   stamp: d => `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
-} : {
-  total: "Total tokens", peak: "Peak day", task: "Longest task", longest: "Longest streak", current: "Current streak",
-  activity: "Token activity", daily: "Daily", weekly: "Weekly", cumulative: "Cumulative",
-  days: n => n + (n === 1 ? " day" : " days"), tokens: v => v + " tokens",
-  date: shortDate, month: d => d.toLocaleDateString("en-US", { month: "short" }),
-  week: s => `Week of ${s}`, through: s => `Through ${s}`,
-  duration, amount: fmt,
-  updated: s => `Updated ${s} · ${origin()}`,
-  stamp: d => d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+  looks: { auto: "◐ 自动", light: "☀︎ 浅色", dark: "☾ 深色" }, styles: { card: "经典", profile: "个人主页" }, auto: "自动",
+  says: (what, now) => `${what}：${now}，点击切换`, language: "语言", appearance: "外观",
+  tip: (a, b) => `${a}：${b}`, lang: "zh-CN", title: () => `${TOOL[source]} 用量`,
 };
+let P = EN;  // the Profile words; draw() picks them
 
 function drawProfile() {
   const name = ALL.user || "you";
@@ -501,9 +515,9 @@ function drawProfile() {
   }
   const week = i => cells.slice(i - i % 7, i - i % 7 + 7);
   const value = (c, i) => mode === "daily" ? c.n : mode === "weekly" ? sum(week(i).map(x => x.n)) : c.running;
-  const label = (c, i) => mode === "daily" ? `${P.date(c.d)}: ${P.tokens(P.amount(c.n))}`
-    : mode === "weekly" ? `${P.week(P.date(week(i)[0].d))}: ${P.tokens(P.amount(value(c, i)))}`
-    : `${P.through(P.date(c.d))}: ${P.tokens(P.amount(c.running))}`;
+  const label = (c, i) => mode === "daily" ? P.tip(P.date(c.d), P.tokens(P.amount(c.n)))
+    : mode === "weekly" ? P.tip(P.week(P.date(week(i)[0].d)), P.tokens(P.amount(value(c, i))))
+    : P.tip(P.through(P.date(c.d)), P.tokens(P.amount(c.running)));
   const cut = quartiles(cells.map(value));
   document.getElementById("year").innerHTML = cells.map((c, i) => {
     const v = value(c, i);
@@ -527,7 +541,19 @@ function draw() {
   document.documentElement.classList.toggle("profile", isProfile);
   document.documentElement.classList.toggle("blue", theme === "blue" && !isProfile);
   document.documentElement.classList.toggle("dark", isDark() && !isProfile);
-  document.getElementById("appearance").textContent = LOOKS[appearance];
+  // Each view keeps to one language: Classic stays English; Profile uses the picked language.
+  P = language === "zh" || language === "auto" && SYSTEM_ZH ? ZH : EN;
+  const words = isProfile ? P : EN;
+  document.getElementById("langseg").hidden = !isProfile;
+  const langButton = document.getElementById("language");
+  langButton.textContent = isProfile ? LANGS[language] + (language === "auto" ? P.auto : "") : "";
+  langButton.setAttribute("aria-label", P.says(P.language, language === "auto" ? P.auto : LANGS[language].replace(/^\S+\s+/, "")));
+  document.documentElement.lang = words.lang;
+  document.title = words.title();
+  const lookButton = document.getElementById("appearance");
+  lookButton.textContent = words.looks[appearance];
+  lookButton.setAttribute("aria-label", words.says(words.appearance, words.looks[appearance].replace(/^\S+\s+/, "")));
+  for (const key of ["card", "profile"]) document.querySelector(`[data-style=${key}]`).textContent = words.styles[key];
   document.documentElement.classList.toggle("light", !isDark() && isProfile);
   document.getElementById("themes").hidden = isProfile;
   document.querySelectorAll("#themes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.theme === theme));
@@ -562,6 +588,12 @@ document.getElementById("appearance").addEventListener("click", () => {
   const order = Object.keys(LOOKS);
   appearance = order[(order.indexOf(appearance) + 1) % order.length];
   keep("cu.appearance", appearance);
+  draw();
+});
+document.getElementById("language").addEventListener("click", () => {
+  const order = Object.keys(LANGS);
+  language = order[(order.indexOf(language) + 1) % order.length];
+  keep("cu.lang", language);
   draw();
 });
 systemDark.addEventListener("change", draw);

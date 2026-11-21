@@ -55,10 +55,14 @@ def main():
     for old, new in (("/*__DATA__*/null", data),
                      ('<meta http-equiv="refresh" content="600">\n', ""),
                      ('<main>\n',
-                      '<main>\n  <p style="color:var(--muted);margin:0 0 16px">'
-                      'Live demo with made-up data. '
+                      '<main>\n  <style>html:lang(zh) .demo-en, html:not(:lang(zh)) .demo-zh { display: none; }</style>\n'
+                      '  <p style="color:var(--muted);margin:0 0 16px">'
+                      '<span class="demo-en">Live demo with made-up data. '
                       '<a href="https://github.com/rzhang569/claude-usage-page" style="color:var(--accent)">'
-                      'Get it for your own usage</a></p>'),
+                      'Get it for your own usage</a></span>'
+                      '<span class="demo-zh">在线演示，数据是编的。'
+                      '<a href="https://github.com/rzhang569/claude-usage-page" style="color:var(--accent)">'
+                      '装一个看看你自己的用量</a></span></p>'),
                      ("from this computer's ${TOOL[source]} history only", "demo data"),
                      ("仅统计这台电脑的 ${TOOL[source]} 记录", "演示数据")):
         assert old in html, old
