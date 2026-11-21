@@ -36,6 +36,8 @@ if (-not (Test-Path $pyw)) { $pyw = $py }
 
 New-Item -ItemType Directory -Force -Path $dest, $skill | Out-Null
 foreach ($f in "build.py", "serve.py", "template.html", "pricing.json") { Copy-Item (Join-Path $src $f) $dest -Force }
+# For the sidebar extension, which asks the page server to rebuild.
+Set-Content -Path (Join-Path $dest "port") -Value $Port -Encoding ascii
 
 & $py (Join-Path $dest "build.py")
 if ($LASTEXITCODE -ne 0) { throw "build.py failed" }

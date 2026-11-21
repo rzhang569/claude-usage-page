@@ -26,6 +26,7 @@ PY="$(command -v python3 || true)"
 
 mkdir -p "$DEST" "$AGENTS" "$SKILL" "$CODEX_SKILL"
 cp "$SRC/build.py" "$SRC/serve.py" "$SRC/template.html" "$SRC/pricing.json" "$DEST/"
+echo "$PORT" > "$DEST/port"  # for the sidebar extension, which asks the page server to rebuild
 
 plist() { # label, interval-or-keepalive, script args...
   label=$1; mode=$2; shift 2

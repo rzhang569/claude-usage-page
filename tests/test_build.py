@@ -898,6 +898,25 @@ class CodexTests(BuildCase):
         self.fixture.config.rename(self.fixture.root / "away")
         self.assertFalse(self.run_build()["claude"])
 
+    def test_a_removed_claude_folder_leaves_its_history_out_beside_codex(self):
+        self.write_session(self.session())
+        kept = self.run_build()
+        self.fixture.config.rename(self.fixture.root / "away")
+        data = self.run_build()
+        self.assertEqual((data["days"], data["models"], data["totals"]["messages"]), ({}, {}, 0))
+        self.assertEqual(json.loads(Path(self.build.SNAPSHOT).read_text(encoding="utf-8"))["days"], {})
+        self.assertTrue(self.cache()["files"])  # still cached, in case it comes back
+        (self.fixture.root / "away").rename(self.fixture.config)
+        self.assertEqual(self.run_build()["days"], kept["days"])
+
+    def test_a_removed_claude_folder_leaves_its_history_out_with_no_codex_either(self):
+        self.run_build()
+        self.fixture.config.rename(self.fixture.root / "away")
+        for data in (self.run_build(), json.loads(Path(self.build.SNAPSHOT).read_text(encoding="utf-8"))):
+            self.assertEqual((data["days"], data["hours"], data["models"], data["tasks"]), ({}, {}, {}, {}))
+            self.assertEqual(set(data["totals"].values()), {0})
+            self.assertIsNone(data["codex"])
+
     def test_deleted_session_files_stay_counted(self):
         path = self.write_session(self.session())
         first = self.run_build()["codex"]
@@ -973,6 +992,9 @@ class IOTests(BuildCase):
             if dst == self.build.CACHE:
                 self.assertEqual(cache_path.read_text(encoding="utf-8"), "old cache")
                 self.assertEqual(json.loads(text)["v"], self.build.CACHE_VERSION)
+            elif dst == self.build.SNAPSHOT:
+                self.assertEqual(json.loads(text)["generatedAt"], json.loads(
+                    re.search(r"const ALL = (\{.*?\});\n", out_path.read_text(encoding="utf-8")).group(1))["generatedAt"])
             else:
                 self.assertEqual(out_path.read_text(encoding="utf-8"), "old page")
                 self.assertIn("const ALL = {", text)
@@ -983,8 +1005,12 @@ class IOTests(BuildCase):
 
         with mock.patch.object(self.build.os, "replace", side_effect=inspect):
             self.run_build()
-        self.assertEqual(replaced, [self.build.CACHE, self.build.OUT])
+        self.assertEqual(replaced, [self.build.CACHE, self.build.OUT, self.build.SNAPSHOT])
         self.assertEqual(self.leftovers(), [])
+
+    def test_snapshot_holds_the_same_data_as_the_page(self):
+        data = self.run_build()
+        self.assertEqual(json.loads(Path(self.build.SNAPSHOT).read_text(encoding="utf-8")), data)
 
     def test_failed_cache_replace_preserves_previous_files(self):
         Path(self.build.CACHE).write_text("old cache", encoding="utf-8")

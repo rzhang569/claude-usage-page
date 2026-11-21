@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Usage</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; height: 100%; background: #f5f4ef; }
+  @media (prefers-color-scheme: dark) { html, body { background: #262624; } }
+  #page { display: block; border: 0; width: 100%; height: 100vh; }
+  #page[hidden], #note[hidden] { display: none; }
+  #note { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #6b6a65; padding: 28px; max-width: 520px; }
+  @media (prefers-color-scheme: dark) { #note { color: #a8a6a0; } }
+  #note button { font: inherit; margin-top: 10px; padding: 6px 12px; border-radius: 8px; border: 1px solid #c9c7bf; background: transparent; color: inherit; cursor: pointer; }
+  #note a { color: inherit; }
+</style>
+</head>
+<body>
+<div id="note">Loading your usage…</div>
+<iframe id="page" title="Claude Code and Codex usage" hidden></iframe>
+<script>
+// The card itself is the same template.html the browser page uses; only its data comes from
+// the Claude Usage Page extension instead of being baked in.
+const PAGE = /*__PAGE__*/"";
+const SERVER = "host:Claude_Usage_Page", TOOL = "get_usage";
+const REPO = "https://github.com/rzhang569/claude-usage-page";
+const frame = document.getElementById("page"), note = document.getElementById("note");
+let shown = null, stop = null;
+// Bumped whenever the card is taken down for good reason, so an answer still on its way from
+// before can't put data back. Passing trouble and a pending OK leave it.
+let era = 0;
+const PASSING = ["approval_required", "consent_required", "server_unavailable", "upstream_error", "rate_limited",
+                 "cancelled", "tool_error"];
+
+// Every message replaces the card: the old data is unloaded, not just hidden.
+function say(text, action) {
+  frame.hidden = true;
+  frame.srcdoc = "";
+  shown = null;
+  note.hidden = false;
+  note.textContent = text;
+  if (action) {
+    const b = document.createElement("button");
+    b.textContent = action.label;
+    b.addEventListener("click", action.run);
+    note.append(document.createElement("br"), b);
+  }
+}
+
+function show(payload) {
+  const data = payload && payload.data;
+  if (!data || !data.days) {
+    say("The extension answered without usage data. Reinstall Claude Usage Page, then reopen this card.");
+    return;
+  }
+  if (shown === data.generatedAt) return;
+  shown = data.generatedAt;
+  // Same escaping as build.py: no "<" at all, so the data can't end or open a script.
+  const json = JSON.stringify(data).replace(/</g, "\\u003c");
+  frame.srcdoc = PAGE.replace("/*__DATA__*/null", () => json);
+  frame.hidden = false;
+  note.hidden = true;
+}
+
+// Denials take the data down (see watchTool in the mcp contract); passing trouble keeps it.
+function failed(error, mcp) {
+  const code = error && error.code;
+  if (!PASSING.includes(code)) era++;
+  if (code === "user_changed") {
+    if (stop) stop();
+    // The usage is this computer's, whoever is signed in: say so rather than promise theirs.
+    say("A different Claude account is signed in now. Reload to load this computer's usage for it.");
+  } else if (code === "needs_reauth") {
+    say("Claude needs you to sign in again. Reload this card afterwards.", { label: "Reload", run: () => location.reload() });
+  } else if (code === "server_not_connected" || code === "server_not_found" || code === "selection_required") {
+    // Pins follow the account to every computer; the usage doesn't.
+    say("This card shows the usage of the computer it's open on, so it needs the Claude Usage Page extension " +
+        "installed and turned on here (Settings → Extensions). Your pins follow you to every computer, but each " +
+        "one shows only its own usage, once the page and the extension are installed on it.");
+  } else if (code === "approval_required" || code === "consent_required") {
+    say("Claude needs your OK before this card reads your usage.", {
+      label: "Allow and load",
+      run: () => {
+        const asked = era;
+        mcp.callTool(SERVER, TOOL, null).then(r => era === asked && show(r.payload), e => era === asked && failed(e, mcp));
+      },
+    });
+  } else if (code === "org_mcp_disabled") {
+    say("Your organization has turned off local extensions in Claude, so this card can't read your usage. " +
+        "Your administrator controls this setting.");
+  } else if (code === "not_in_manifest" || code === "blocked_by_policy" || code === "not_granted" || code === "consent_denied" ||
+             code === "capability_disabled" || code === "capability_removed") {
+    say("This card isn't allowed to read your usage here. Check the artifact's Permissions menu in the Claude desktop app.");
+  } else if (code === "tool_error") {
+    say(error.message || "The extension couldn't read your usage.");
+  } else if (code === "cancelled") {
+    say("Loading was cancelled.", { label: "Try again", run: () => location.reload() });
+  } else if (!shown) {
+    // Transient (server_unavailable, upstream_error, ...): keep showing the last data if any.
+    say("The extension didn't answer just now" + (code ? ` (${code})` : "") + ".",
+        { label: "Try again", run: () => location.reload() });
+  }
+}
+
+(async () => {
+  const mcp = window.claude && window.claude.use ? await window.claude.use("mcp") : null;
+  if (!mcp) {
+    frame.hidden = true;
+    note.innerHTML = "";
+    note.append("This card works as a pinned artifact in the Claude desktop app, with the Claude Usage Page extension. " +
+                "The browser version is at http://127.0.0.1:8788/ unless you installed it on another port. ");
+    const a = document.createElement("a");
+    a.href = REPO; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Setup";
+    note.append(a);
+    return;
+  }
+  stop = mcp.watchTool(SERVER, TOOL, null, ev => {
+    if (ev.type === "data") show(ev.result.payload);  // a watch only delivers while access lasts
+    else failed(ev.error, mcp);
+  }, { cache: { staleTime: 60000, gcTime: 604800000 }, refetchInterval: 600000 });
+})();
+</script>
+</body>
+</html>

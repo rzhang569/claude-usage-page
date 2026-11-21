@@ -2,6 +2,9 @@ index.html
 cache.json
 cache-v4.json
 *.tmp
+data.json
+port
+dist/
 *.log
 .DS_Store
 __pycache__/
