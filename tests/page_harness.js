@@ -76,6 +76,6 @@ for (const [id, dataset] of input.clicks || []) {
 const out = { classes: [...root.classes], lang: root.lang, title: sandbox.document.title, elements: {}, pressed, addressBar,
   storage: Object.fromEntries(store) };
 for (const [id, el] of Object.entries(elements)) {
-  out.elements[id] = { hidden: el.hidden, html: el.innerHTML, text: el.textContent, attrs: el.attrs };
+  out.elements[id] = { hidden: el.hidden, html: el.innerHTML, text: el.textContent, attrs: el.attrs, dataset: el.dataset };
 }
 console.log(JSON.stringify(out));

@@ -49,6 +49,8 @@
   .legend .cell { width: 11px; height: 11px; aspect-ratio: auto; border-radius: 3px; }
   .split { color: var(--muted); margin-top: 12px; font-variant-numeric: tabular-nums; }
   .fun { color: var(--muted); margin-top: 6px; }
+  .costline { color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .costline b { color: var(--ink); font-weight: 600; }
   .foot { color: var(--muted); font-size: 12px; margin-top: 14px; }
   .chart { margin-top: 4px; overflow-x: auto; }
   .chart svg { display: block; }
@@ -62,7 +64,7 @@
   .tablewrap { overflow-x: auto; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
   #tip { position: fixed; z-index: 10; pointer-events: none; background: var(--tip); color: #faf8f3;
-    font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: pre; }
+    font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: pre-wrap; max-width: calc(100vw - 16px); box-sizing: border-box; }
   .top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
   .top h1 { margin: 0; }
   .switches { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -114,6 +116,7 @@
         <button data-source="claude">Claude Code</button>
         <button data-source="codex">Codex</button>
       </div>
+      <div class="seg" id="costseg"><button id="costbtn" aria-label="API cost estimate">$ API cost</button></div>
       <div class="seg" id="langseg"><button id="language" class="cycle"></button></div>
       <div class="seg"><button id="appearance" class="cycle"></button></div>
       <div class="seg" id="themes">
@@ -164,6 +167,7 @@
       <div class="heat"><div class="heat-grid" id="heat"></div></div>
       <div class="legend">Less <span class="cell"></span><span class="cell l1"></span><span class="cell l2"></span><span class="cell l3"></span><span class="cell l4"></span> More</div>
       <div class="split" id="split"></div>
+      <div class="costline" id="costline"></div>
       <div class="fun" id="fun"></div>
     </section>
 
@@ -217,6 +221,7 @@ if (!Object.prototype.hasOwnProperty.call(LOOKS, appearance)) appearance = "auto
 let language = pick("cu.lang", "auto");
 if (!["auto", "en", "zh"].includes(language)) language = "auto";
 let mode = pick("cu.mode", "daily");
+let showCost = pick("cu.cost", "on") !== "off";
 let source = new URLSearchParams(location.search).get("source") || pick("cu.source", "claude");
 if (!SOURCES[source]) source = SOURCES.claude ? "claude" : "codex";
 let DATA;
@@ -230,6 +235,19 @@ const fmt = n => {
   return String(Math.round(n));
 };
 const group = n => n.toLocaleString("en-US");
+// Dollars: cents under $10, whole dollars under $1,000, then $12.3k and $1.2M like tokens.
+const usd = n => n > 0 && n < 0.01 ? "<$0.01" : n < 10 ? "$" + n.toFixed(2) : n < 1000 ? "$" + Math.round(n)
+  : n < 1e6 ? "$" + (n / 1e3).toFixed(1) + "k" : "$" + (n / 1e6).toFixed(1) + "M";
+// Where some tokens had no price the known dollars are a floor: rounded down, so "≥" stays true.
+const floorUsd = n => {
+  const cut = (v, step) => (Math.floor(v / step + 1e-9) * step);
+  return n < 10 ? "$" + cut(n, 0.01).toFixed(2) : n < 1000 ? "$" + cut(n, 1)
+    : n < 1e6 ? "$" + cut(n / 1e3, 0.1).toFixed(1) + "k" : "$" + cut(n / 1e6, 0.1).toFixed(1) + "M";
+};
+const atLeast = (n, partial) => partial ? "≥ " + floorUsd(n) : usd(n);
+// A share that rounds to 100% while some of it was priced reads as ">99%".
+const share = f => f < 1 && f >= 0.995 ? ">99%" : (f * 100).toFixed(f < 0.1 ? 1 : 0) + "%";
+const PROVIDER = { claude: "Claude API", codex: "OpenAI API" };
 const sum = a => a.reduce((x, y) => x + y, 0);
 const iso = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 const parse = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
@@ -263,12 +281,13 @@ function hourLabel(h) {
 }
 
 const origin = () => `from this computer's ${TOOL[source]} history only`;
-let today, allDates, firstDay, RATIO, RANKED;
+let today, allDates, firstDay, RATIO, RANKED, hasPrices;
 
 function load() {
   DATA = SOURCES[source];
   today = parse(DATA.today);
   allDates = Object.keys(DATA.days).sort();
+  hasPrices = !!ALL.pricing && Object.values(DATA.days).some(d => d.c || d.u);
   firstDay = allDates.length ? parse(allDates[0]) : today;
   // Each model's all-time mix of input / output / cache write / cache read, used to
   // split days whose history only kept a per-model total.
@@ -328,9 +347,23 @@ function compute() {
   const { longest, current } = streaks();
   const longestTask = Math.max(0, ...Object.entries(DATA.tasks).filter(([k]) => k >= w.startKey).map(([, v]) => v));
 
+  // Cost at API list prices, from the days in range: c is dollars by model, u the tokens left
+  // unpriced, ct the tokens the estimate covers (each response once), so u / ct is the share.
+  const cost = { dollars: 0, unpriced: 0, tokens: 0, byModel: {}, partial: {} };
+  // Every day in range, not only the active ones: a day can hold a search fee and nothing else.
+  if (priced()) for (const k of allDates.filter(k => k >= w.startKey && k <= w.endKey)) {
+    const d = DATA.days[k];
+    cost.tokens += d.ct || 0;
+    cost.unpriced += d.u || 0;
+    for (const [m, v] of Object.entries(d.c || {})) {
+      cost.dollars += v;
+      cost.byModel[modelName(m)] = (cost.byModel[modelName(m)] || 0) + v;
+    }
+    for (const [m, v] of Object.entries(d.um || {})) if (v) cost.partial[modelName(m)] = true;
+  }
   const peak = hours.indexOf(Math.max(...hours));
   const favorite = Object.entries(models).sort((a, b) => sum(b[1]) - sum(a[1]))[0];
-  return { keys, msgs, sessions, tok, total, models, span, activeDays: keys.length, estimated,
+  return { keys, msgs, sessions, tok, total, models, span, activeDays: keys.length, estimated, cost,
     hasHours: sum(hours) > 0, longest, current, longestTask, busiest, peak,
     favorite: favorite ? favorite[0] : "—" };
 }
@@ -363,13 +396,30 @@ function drawOverview(s) {
     const lvl = n === 0 ? "" : n <= cut[0] ? "l1" : n <= cut[1] ? "l2" : n <= cut[2] ? "l3" : "l4";
     const out = d > today ? " out" : "";
     const dim = (k < w.startKey && n) ? ' style="opacity:.35"' : "";
-    const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " — " + group(n);
+    const spent = priced() && DATA.days[k] && DATA.days[k].c ? sum(Object.values(DATA.days[k].c)) : 0;
+    const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " — " + group(n) +
+      (spent ? " · " + atLeast(spent, DATA.days[k].u > 0) : "");
     cells += `<div class="cell ${lvl}${out}"${out ? "" : ` data-tip="${label}"`}${dim}></div>`;
   }
   document.getElementById("heat").innerHTML = cells;
 
   document.getElementById("split").textContent = (s.estimated ? "≈ " : "") +
     `Input ${fmt(s.tok[0])} · Output ${fmt(s.tok[1])} · Cache read ${fmt(s.tok[3])} · Cache write ${fmt(s.tok[2])}`;
+  const line = document.getElementById("costline");
+  line.hidden = !priced();
+  if (priced()) {
+    const c = s.cost, left = c.tokens ? c.unpriced / c.tokens : 0;
+    const when = ALL.pricing.reviewed ? parse(ALL.pricing.reviewed).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+    // With nothing priced at all, $0.00 would read as free.
+    line.innerHTML = (c.dollars || !c.unpriced ? `≈ <b>${usd(c.dollars)}</b>` : `<b>No estimate</b>`) + ` at ${PROVIDER[source]} list prices` +
+      (left >= 0.0005 ? ` · ${share(left)} of tokens not priced` : left > 0 ? " · <0.1% of tokens not priced" : "");
+    const until = partlyEstimated(s), partial = !!until;
+    if (partial) line.innerHTML += ` · history through ${until} partly estimated`;
+    line.dataset.tip = `What this usage would cost through the ${PROVIDER[source]} at list prices` +
+      (when ? ` (reviewed ${when})` : "") + `. A subscription is billed separately.` +
+      (left > 0 ? " Not priced: models without a listed price and history kept only as totals." : "") +
+      (partial ? ` Days through ${until} are priced from the transcripts still on this computer, which may not cover all of that usage.` : "");
+  }
   const spent = s.tok[0] + s.tok[1];
   const books = BOOKS.filter(b => spent >= b[1]);
   const book = books[Math.floor(LUCK * books.length)];
@@ -380,8 +430,11 @@ function drawOverview(s) {
 }
 
 function drawModels(s) {
-  // Models under 0.05% of the range are noise: leftovers from a retry or a one-off test.
-  const names = Object.keys(s.models).filter(n => sum(s.models[n]) >= s.total * 0.0005)
+  // Models under 0.05% of the range are noise: leftovers from a retry or a one-off test. A few
+  // tokens of an expensive model can still be real money, so the table keeps those too.
+  const material = n => sum(s.models[n]) >= s.total * 0.0005;
+  const spends = n => s.cost.byModel[n] > 0 && s.cost.byModel[n] >= s.cost.dollars * 0.0005;
+  const names = Object.keys(s.models).filter(material)
     .sort((a, b) => sum(s.models[b]) - sum(s.models[a]));
   const palette = PALETTES[theme + (isDark() ? "Dark" : "")];
   const color = Object.fromEntries(RANKED.map((n, i) => [n, palette[i % palette.length]]));
@@ -389,10 +442,17 @@ function drawModels(s) {
 
   const days = [];
   for (let d = new Date(window_().start); d <= today; d = addDays(d, 1)) days.push(iso(d));
+  const dollars = {}, partly = {};
   const perDay = days.map(k => {
-    const out = {};
+    const out = {}, paid = {}, part = {};
     const d = DATA.days[k];
     if (d) for (const [m, v] of Object.entries(d.tm)) { const n = modelName(m); out[n] = (out[n] || 0) + v; }
+    if (d && priced()) {
+      for (const [m, v] of Object.entries(d.c || {})) { const n = modelName(m); paid[n] = (paid[n] || 0) + v; }
+      for (const [m, v] of Object.entries(d.um || {})) if (v) part[modelName(m)] = true;
+    }
+    dollars[k] = paid;
+    partly[k] = part;
     return out;
   });
   const max = Math.max(1, ...perDay.map(o => sum(Object.values(o))));
@@ -412,7 +472,8 @@ function drawModels(s) {
     }
     const used = names.filter(n => o[n]);
     if (used.length) {
-      const text = [shortDate(parse(days[i])), ...used.map(n => `${n}: ${fmt(o[n])}`)].join("&#10;");
+      const paid = dollars[days[i]];
+      const text = [shortDate(parse(days[i])), ...used.map(n => `${n}: ${fmt(o[n])}` + (paid[n] ? ` · ${atLeast(paid[n], partly[days[i]][n])}` : ""))].join("&#10;");
       bars += `<rect x="${i * slot}" y="0" width="${slot}" height="${H}" fill="transparent" data-tip="${text}"/>`;
     }
   });
@@ -424,16 +485,38 @@ function drawModels(s) {
     `<text x="${W}" y="${H + 14}" font-size="11" style="fill:var(--muted)" text-anchor="end">Today · peak ${fmt(max)}/day</text></svg>`;
 
   const total = s.total || 1;
+  const until = priced() && partlyEstimated(s);
+  const notes = [
+    ...(s.estimated ? ["Input / output / cache columns are estimated for days whose history only kept a per-model total."] : []),
+    ...(until ? [`API cost through ${until} comes from the transcripts still on this computer and may miss some usage.`] : []),
+  ];
+  // A search fee can come from a model with no tokens in the range: it still gets a row.
+  const tokensOf = n => s.models[n] ? sum(s.models[n]) : 0;
+  const rows = [...new Set([...Object.keys(s.models), ...(priced() ? Object.keys(s.cost.byModel) : [])])]
+    .filter(n => tokensOf(n) ? material(n) || priced() && spends(n) : priced() && s.cost.byModel[n] > 0)
+    .sort((a, b) => tokensOf(b) - tokensOf(a));
   document.getElementById("mtable").innerHTML =
-    (s.estimated ? `<caption style="caption-side:bottom;text-align:left;color:var(--muted);font-size:12px;padding-top:8px">Input / output / cache columns are estimated for days whose history only kept a per-model total.</caption>` : "") +
-    `<tr><th>Model</th><th>Tokens</th><th>Share</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th></tr>` +
-    names.map(n => {
-      const c = s.models[n];
-      return `<tr><td><span class="swatch" style="background:${color[n]}"></span>${n}</td><td>${fmt(sum(c))}</td>` +
-        `<td>${(sum(c) / total * 100).toFixed(1)}%</td><td>${fmt(c[0])}</td><td>${fmt(c[1])}</td><td>${fmt(c[2])}</td><td>${fmt(c[3])}</td></tr>`;
+    (notes.length ? `<caption style="caption-side:bottom;text-align:left;color:var(--muted);font-size:12px;padding-top:8px">${notes.join(" ")}</caption>` : "") +
+    `<tr><th>Model</th><th>Tokens</th><th>Share</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th>` +
+    (priced() ? `<th data-tip="At ${PROVIDER[source]} list prices; a subscription is billed separately">API cost</th>` : "") + `</tr>` +
+    rows.map(n => {
+      const c = s.models[n] || [0, 0, 0, 0], paid = s.cost.byModel[n], partial = s.cost.partial[n];
+      // Some of this model's tokens had no price: what is shown is a floor, not the cost.
+      const spent = partial ? `<td data-tip="Some of this model's tokens couldn't be priced, so this is a floor">${paid ? atLeast(paid, true) : "not priced"}</td>`
+                            : `<td>${paid ? usd(paid) : "—"}</td>`;
+      return `<tr><td><span class="swatch" style="background:${color[n] || "var(--muted)"}"></span>${n}</td><td>${fmt(sum(c))}</td>` +
+        `<td>${(sum(c) / total * 100).toFixed(1)}%</td><td>${fmt(c[0])}</td><td>${fmt(c[1])}</td><td>${fmt(c[2])}</td><td>${fmt(c[3])}</td>` +
+        (priced() ? spent : "") + `</tr>`;
     }).join("");
 }
 
+// Cost shows when this build had a price list and the reader hasn't turned it off.
+const priced = () => showCost && hasPrices;
+// The last day of Claude Code history priced only from the transcripts that survive, if the range reaches it.
+function partlyEstimated(s) {
+  const before = source === "claude" && ALL.pricing && ALL.pricing.partialBefore;
+  return before && s.keys.some(k => k <= before) ? parse(before).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+}
 const dayTokens = k => DATA.days[k] ? sum(Object.values(DATA.days[k].tm)) : 0;
 const active = k => !!DATA.days[k] && DATA.days[k].m + dayTokens(k) > 0;
 
@@ -556,6 +639,8 @@ function draw() {
   for (const key of ["card", "profile"]) document.querySelector(`[data-style=${key}]`).textContent = words.styles[key];
   document.documentElement.classList.toggle("light", !isDark() && isProfile);
   document.getElementById("themes").hidden = isProfile;
+  document.getElementById("costseg").hidden = isProfile || !hasPrices;
+  document.getElementById("costbtn").setAttribute("aria-pressed", showCost);
   document.querySelectorAll("#themes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.theme === theme));
   document.getElementById("profile").hidden = !isProfile;
   document.getElementById("cardview").hidden = isProfile;
@@ -590,6 +675,11 @@ document.getElementById("appearance").addEventListener("click", () => {
   keep("cu.appearance", appearance);
   draw();
 });
+document.getElementById("costbtn").addEventListener("click", () => {
+  showCost = !showCost;
+  keep("cu.cost", showCost ? "on" : "off");
+  draw();
+});
 document.getElementById("language").addEventListener("click", () => {
   const order = Object.keys(LANGS);
   language = order[(order.indexOf(language) + 1) % order.length];
@@ -604,7 +694,7 @@ document.addEventListener("mousemove", e => {
   if (!t) { tip.hidden = true; return; }
   tip.textContent = t.dataset.tip;
   tip.hidden = false;
-  const x = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8);
+  const x = Math.max(8, Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8));
   const y = e.clientY - tip.offsetHeight - 10;
   tip.style.left = x + "px";
   tip.style.top = (y < 4 ? e.clientY + 16 : y) + "px";

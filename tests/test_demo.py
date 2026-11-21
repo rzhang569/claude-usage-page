@@ -11,10 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DemoTests(unittest.TestCase):
-    def build(self):
+    def build(self, *day):
         with tempfile.TemporaryDirectory() as temp:
             out = Path(temp) / "index.html"
-            subprocess.run([sys.executable, str(ROOT / "docs" / "make_demo.py"), str(out)], check=True, timeout=30)
+            subprocess.run([sys.executable, str(ROOT / "docs" / "make_demo.py"), str(out), *day], check=True, timeout=30)
             return out.read_text(encoding="utf-8")
 
     def test_demo_embeds_valid_data_and_labels_itself(self):
@@ -25,5 +25,7 @@ class DemoTests(unittest.TestCase):
         self.assertNotIn("/*__DATA__*/null", html)
         self.assertNotIn('http-equiv="refresh"', html)
 
-    def test_demo_is_repeatable_for_a_given_day(self):
-        self.assertEqual(self.build(), self.build())
+    def test_checked_in_demo_matches_the_template_and_generator(self):
+        shipped = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        day = re.search(r'"today":"(\d{4}-\d\d-\d\d)"', shipped).group(1)
+        self.assertEqual(self.build(day), shipped, "run: python3 docs/make_demo.py docs/index.html " + day)

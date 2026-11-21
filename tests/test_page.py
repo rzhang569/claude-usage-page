@@ -64,6 +64,128 @@ class PageTests(unittest.TestCase):
     def tips(self, result, box):
         return [html.unescape(t) for t in re.findall(r'data-tip="(.*?)"', result["elements"][box]["html"])]
 
+    def priced(self, **changes):
+        days = data()["days"]
+        days["2026-01-01"] = {**days["2026-01-01"], "c": {OPUS: 1234.5, SONNET: 0.004}, "ct": 2900}
+        days["2025-12-31"] = {**days["2025-12-31"], "c": {OPUS: 8.25}, "u": 600, "ct": 1200}
+        return data(days=days, pricing={"reviewed": "2026-11-20", "claude": "x", "openai": "y"}, **changes)
+
+    def test_cost_line_tooltips_and_column_show_api_list_prices(self):
+        result = self.page(self.priced())
+        line = result["elements"]["costline"]
+        self.assertFalse(line["hidden"])
+        # 600 of the 4,100 tokens the estimate covers are unpriced (ct, not the page's token totals).
+        self.assertEqual(html.unescape(re.sub(r"<[^>]+>", "", line["html"])),
+                         "≈ $1.2k at Claude API list prices · 15% of tokens not priced")
+        self.assertIn("Jan 1 — 12 · $1.2k", self.tips(result, "heat"))
+        self.assertIn("Dec 31 — 7 · ≥ $8.25", self.tips(result, "heat"))  # 600 tokens there had no price
+        table = self.page(self.priced(), storage={"cu.tab": "models"})["elements"]["mtable"]["html"]
+        self.assertIn(">API cost</th>", table)
+        self.assertIn("<td>$1.2k</td>", table)
+        chart = self.tips(self.page(self.priced(), storage={"cu.tab": "models"}), "chart")
+        self.assertTrue(any("Opus 5.5: 3.0k · $1.2k" in tip for tip in chart))
+
+    def test_history_priced_from_surviving_transcripts_is_marked_partial(self):
+        payload = self.priced()
+        payload["pricing"]["partialBefore"] = "2025-12-31"
+        line = self.page(payload)["elements"]["costline"]
+        self.assertIn("history through Dec 31 partly estimated", line["html"])
+        recent = self.page(payload, storage={"cu.range": "7"})  # today is Jan 1; 7d still includes Dec 31
+        self.assertIn("partly estimated", recent["elements"]["costline"]["html"])
+        # Between the November activity and the last 7 days: All reaches it, 7d doesn't.
+        payload["pricing"]["partialBefore"] = "2025-11-30"
+        self.assertIn("partly estimated", self.page(payload)["elements"]["costline"]["html"])
+        self.assertNotIn("partly estimated", self.page(payload, storage={"cu.range": "7"})["elements"]["costline"]["html"])
+
+    def test_cost_formats_cents_dollars_and_thousands(self):
+        for dollars, shown in ((0.004, "<$0.01"), (8.25, "$8.25"), (123.4, "$123"), (12345, "$12.3k"), (2.5e6, "$2.5M")):
+            days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10}, "sp": [1, 1, 1, 7], "sc": 1, "c": {OPUS: dollars}}}
+            result = self.page(data(days=days, pricing={"reviewed": "2026-11-20"}))
+            self.assertIn(f"<b>{shown}</b>", result["elements"]["costline"]["html"], dollars)
+
+    def test_cost_button_turns_cost_off_and_is_remembered(self):
+        off = self.page(self.priced(), clicks=[("costbtn", {})])
+        self.assertTrue(off["elements"]["costline"]["hidden"])
+        self.assertEqual(off["storage"]["cu.cost"], "off")
+        self.assertEqual(off["elements"]["costbtn"]["attrs"]["aria-pressed"], "false")
+        self.assertNotIn("$", " ".join(self.tips(off, "heat")))
+        table = self.page(self.priced(), storage={"cu.tab": "models", "cu.cost": "off"})["elements"]["mtable"]["html"]
+        self.assertNotIn("API cost", table)
+        self.assertEqual(self.page(self.priced())["elements"]["costbtn"]["attrs"]["aria-pressed"], "true")
+
+    def test_no_prices_means_no_cost_anywhere(self):
+        result = self.page()
+        self.assertTrue(result["elements"]["costline"]["hidden"])
+        self.assertTrue(result["elements"]["costseg"]["hidden"])
+        self.assertTrue(self.page(self.priced(), storage={"cu.style": "profile"})["elements"]["costseg"]["hidden"])
+
+    def test_a_day_with_only_a_search_fee_still_counts(self):
+        days = data()["days"]
+        days["2025-12-30"] = {"m": 0, "tm": {}, "sc": 0, "c": {OPUS: 5}}
+        result = self.page(data(days=days, pricing={"reviewed": "2026-11-20"}))
+        self.assertIn("<b>$5.00</b>", result["elements"]["costline"]["html"])
+
+    def test_a_model_with_unpriced_tokens_shows_a_floor_rounded_down(self):
+        def cost_cell(dollars, unpriced):
+            days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10}, "sp": [1, 1, 1, 7], "sc": 1, "c": {OPUS: dollars},
+                                   "um": {OPUS: unpriced}, "u": unpriced, "ct": 10}}
+            table = self.page(data(days=days, pricing={"reviewed": "2026-11-20"}), storage={"cu.tab": "models"})
+            return html.unescape(re.findall(r"<td[^>]*>([^<]*)</td>", table["elements"]["mtable"]["html"])[-1])
+        self.assertEqual(cost_cell(10.51, 5), "≥ $10")
+        self.assertEqual(cost_cell(1234.5, 5), "≥ $1.2k")
+        self.assertEqual(cost_cell(0.003, 5), "≥ $0.00")
+        self.assertEqual(cost_cell(10.51, 0), "$11")  # fully priced: rounded as usual, no mark
+
+    def test_a_model_with_few_tokens_but_real_spend_keeps_its_row(self):
+        days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10**7, SONNET: 100}, "sp": [1, 1, 1, 7], "sc": 1,
+                               "c": {OPUS: 10, SONNET: 16}, "ct": 10**7 + 100}}
+        payload = data(days=days, models={OPUS: [0, 0, 0, 10**7], SONNET: [0, 100, 0, 0]}, pricing={"reviewed": "x"})
+        table = self.page(payload, storage={"cu.tab": "models"})["elements"]["mtable"]["html"]
+        self.assertIn("Sonnet 5.5</td><td>100</td>", table)
+        self.assertIn("<td>$16</td>", table)
+        keys = self.page(payload, storage={"cu.tab": "models"})["elements"]["keys"]["html"]
+        self.assertNotIn("Sonnet", keys)  # the chart still leaves out what it can't draw
+
+    def test_a_tiny_unpriced_share_still_shows(self):
+        days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10**6}, "sp": [0, 0, 0, 10**6], "sc": 1, "c": {OPUS: 0.2},
+                               "u": 400, "ct": 10**6 + 400}}
+        line = self.page(data(days=days, pricing={"reviewed": "x"}))["elements"]["costline"]
+        self.assertIn("<0.1% of tokens not priced", html.unescape(line["html"]))
+        self.assertIn("Not priced:", line["dataset"]["tip"])
+
+    def test_a_search_fee_with_no_tokens_in_range_keeps_its_row(self):
+        for counters in ({}, {SONNET: 0}):  # no entry at all, or an explicit zero
+            with self.subTest(counters=counters):
+                days = {"2026-01-01": {"m": 1, "tm": {OPUS: 1000, **counters}, "sp": [1, 1, 1, 997], "sc": 1,
+                                       "c": {OPUS: 100, SONNET: 0.01}, "ct": 1000}}
+                payload = data(days=days, models={OPUS: [1, 1, 1, 997]}, pricing={"reviewed": "x"})
+                table = self.page(payload, storage={"cu.tab": "models"})["elements"]["mtable"]["html"]
+                self.assertRegex(table, r"Sonnet 5\.5</td><td>0</td>.*<td>\$0\.01</td></tr>")
+
+    def test_a_mostly_unpriced_range_doesnt_round_to_all(self):
+        days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10**6}, "sp": None, "sc": 1, "c": {OPUS: 0.2}, "u": 999000, "ct": 10**6}}
+        line = self.page(data(days=days, pricing={"reviewed": "x"}))["elements"]["costline"]["html"]
+        self.assertIn(">99% of tokens not priced", html.unescape(line))
+
+    def test_models_table_says_when_old_history_is_partly_priced(self):
+        payload = self.priced()
+        payload["pricing"]["partialBefore"] = "2025-12-31"
+        table = self.page(payload, storage={"cu.tab": "models"})["elements"]["mtable"]["html"]
+        self.assertIn("API cost through Dec 31 comes from the transcripts still on this computer", table)
+        payload["pricing"]["partialBefore"] = "2025-10-01"
+        self.assertNotIn("API cost through", self.page(payload, storage={"cu.tab": "models"})["elements"]["mtable"]["html"])
+
+    def test_history_with_nothing_priced_says_so_instead_of_free(self):
+        days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10}, "sp": None, "sc": 1, "u": 10, "ct": 10}}
+        line = self.page(data(days=days, pricing={"reviewed": "x"}))["elements"]["costline"]["html"]
+        self.assertTrue(line.startswith("<b>No estimate</b>"), line)
+        self.assertIn("100% of tokens not priced", line)
+
+    def test_codex_cost_names_the_openai_api(self):
+        codex = {**CODEX, "days": {"2026-01-02": {**CODEX["days"]["2026-01-02"], "c": {"gpt-6.1-sol": 4.2}}}}
+        result = self.page(self.priced(codex=codex), storage={"cu.source": "codex"})
+        self.assertIn("at OpenAI API list prices", result["elements"]["costline"]["html"])
+
     def test_heatmap_hover_is_the_date_and_count_with_no_future_days(self):
         tips = self.tips(self.page(), "heat")
         self.assertEqual(tips[-1], "Jan 1 — 12")
@@ -177,6 +299,47 @@ class PageTests(unittest.TestCase):
                 self.assertEqual((classic["lang"], classic["title"]), ("en", "Claude Code Usage"))
         english = self.page(both, language="en-US", storage={"cu.style": "profile", "cu.mode": "weekly"})
         self.assertNotRegex(self.words(english), cjk)
+
+    def test_profile_in_chinese_leaves_no_english_written_in_the_markup(self):
+        # Words written into template.html itself, which the harness only sees once the script sets them.
+        from html.parser import HTMLParser
+        found = []
+
+        class Static(HTMLParser):
+            stack = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag not in ("meta", "link", "br", "img", "input"):
+                    self.stack.append(dict(attrs))
+
+            def handle_endtag(self, tag):
+                if tag not in ("meta", "link", "br", "img", "input") and self.stack:
+                    self.stack.pop()
+
+            def handle_data(self, text):
+                if text.strip() and self.stack and any(a.get("id") == "profile" or a.get("class") == "top" for a in self.stack):
+                    found.append((text.strip(), [dict(a) for a in self.stack]))
+
+        template = (ROOT / "template.html").read_text(encoding="utf-8")
+        Static().feed(template[template.index("<main>"):template.index('<div class="card" id="cardview">')])
+        result = self.page(data(codex=CODEX), language="zh-CN", storage={"cu.style": "profile"})
+        shown = result["elements"]
+
+        def key(attrs):
+            if attrs.get("id"):
+                return attrs["id"]
+            data_attr = next(((k, v) for k, v in attrs.items() if k.startswith("data-")), None)
+            return data_attr and "selector:[%s=%s]" % data_attr
+
+        self.assertTrue(found)
+        for text, stack in found:
+            if any(shown.get(a.get("id"), {}).get("hidden") for a in stack if a.get("id")):
+                continue  # inside something the Profile view hides
+            if re.fullmatch(r"Claude Code|Codex", text):
+                continue  # product names
+            el = shown.get(key(stack[-1]))
+            self.assertIsNotNone(el, f"{text!r} is never rewritten for Chinese")
+            self.assertNotRegex(re.sub(r"Token", "", el["text"]), r"[A-Za-z]{2,}", text)
 
     def test_profile_language_button_picks_auto_english_or_chinese(self):
         button = lambda r: r["elements"]["language"]["text"]
@@ -295,8 +458,11 @@ class PageTests(unittest.TestCase):
         self.assertFalse(self.page(data(codex=CODEX))["elements"]["sources"]["hidden"])
 
     def test_a_computer_with_neither_tool_shows_an_empty_page(self):
-        result = self.page(data(claude=False))
+        # What build.py writes then: no history at all.
+        empty = data(claude=False, days={}, hours={}, models={}, tasks={}, totals={"sessions": 0, "messages": 0})
+        result = self.page(empty)
         self.assertEqual(result["elements"]["title"]["text"], "Claude Code usage")
+        self.assertEqual((self.tiles(result)["Sessions"], self.tiles(result)["Messages"]), ("0", "0"))
 
     def test_a_link_for_a_tool_that_is_gone_shows_the_other_one(self):
         result = self.page(data(claude=False, codex=CODEX), search="?source=claude")

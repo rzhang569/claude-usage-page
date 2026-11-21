@@ -22,6 +22,7 @@ Unofficial; not affiliated with Anthropic or OpenAI.
 - All / 30d / 7d ranges. Hover anything for exact values. Streaks and the heatmap always cover your whole history.
 - **Longest task** runs from a message you send to the end of the reply. A gap over 30 minutes ends it, so a sleeping computer doesn't count.
 - Pick auto, light or dark appearance, where auto follows your computer, and an orange or a blue color theme for Classic.
+- **API cost** (Classic): what the same usage would cost through the Claude or OpenAI API at list prices, under the token split, per day on hover and per model on the Models tab. The **$ API cost** button turns it off. See [API cost estimate](#api-cost-estimate).
 
 When the numbers update:
 
@@ -53,7 +54,19 @@ The page shows only the tools with history on this computer, so with just one of
 - Days, models and tasks come from `~/.codex/sessions/`, counting each API response once. Only token counts and timestamps are kept, never what was said.
 - Days are split in UTC, like OpenAI's page, so the Codex view can show a different date from the Claude Code one in the evening. Automatic approval reviews are left out too.
 - **Longest task** uses the run time Codex records for each task, the same figure as its profile page. It can be shorter than the time between start and finish, and it isn't measured the same way as Claude Code's.
-- Threads whose session files Codex has compressed, or that have no token rows, come from Codex's state database. They only have a total, so it is shared over the active days in the thread's life and its input / output / cache split is estimated (marked with ≈).
+- Each Codex response counts once, by its id, wherever it shows up: a forked thread's copy of its parent's history, or the replay in the file Codex writes when you edit an earlier message. A forked thread's copied messages count once by id, and its copied usage counts for the parent. When the parent's own file is gone, the fork's copy of its records prices it. Threads an earlier version of this page cached keep their totals, days and messages; a fork's copy adds only what came after them. Archived threads (`archived_sessions`) count like the rest.
+- Known limits, each needing an unusual mix of Codex history: a fork whose file Codex had already compressed when this page first looked is known only from Codex's database, whose total for it includes what it inherited, so that part counts twice; an edited thread whose replayed rows carry no ids (older Codex formats) can count those rows twice; while an edited thread's original file is still readable, usage in its replacement after Codex compressed that is missed; and a parent cached by an earlier version only as a header, or a file that grew on an earlier version after this one cached it and is gone now, can lose some messages or a copy's prices.
+- Threads whose session files Codex has compressed, or that have no token rows, come from Codex's state database, as does what a thread used after the last build before its file was compressed. They only have a total, so it is shared over the active days in the thread's life and its input / output / cache split is estimated (marked with ≈). While a thread's file is readable, the file is what counts.
+
+### API cost estimate
+
+This is what the recorded usage would cost if you paid for it through the API at list prices. It is not your bill: a Claude or ChatGPT subscription is billed separately.
+
+- Prices live in [`pricing.json`](pricing.json), copied from [Anthropic's](https://platform.claude.com/docs/en/about-claude/pricing) and [OpenAI's](https://developers.openai.com/api/docs/pricing) pricing pages, with the date they were last checked (shown on hover). Edit it and reinstall when a price or model changes.
+- Each API response is priced once, before anything is added up. For Claude that includes 5-minute and 1-hour cache writes, fast mode, US-only inference, Haiku 5.5's long-prompt rate and web searches. For Codex it includes the Fast (formerly Priority) and Ultrafast tiers, the long-context rate over 272K input tokens per request, and $0.01 per hosted web search (page opens and finds in a page are free). Codex cache writes are priced at the 30-minute rate. Ultrafast's promotional rate ends on OpenAI's date in Pacific time. A session started in an older Codex and resumed in a newer one counts only its newer part, in tokens as in cost.
+- Not priced, and shown as a share of the tokens the estimate covers (each response once): models or tiers with no listed price, or a token type with none (only that type); history kept only as totals, such as `stats-cache.json` days with no transcript and Codex threads known only from its state database; transcripts cached before this feature whose files are gone, because their cache durations or tier weren't recorded; and Codex sessions from versions that didn't save the service tier, where Fast can't be told from standard.
+- History before `stats-cache.json` was last written is priced from the transcripts still on this computer. If Claude Code cleaned some up before you installed this page, that part of the estimate is low, and the page says history is partly estimated.
+- Batch discounts, regional endpoints other than Claude's US-only option, and tool fees other than web search are not included.
 
 ## Install
 
@@ -71,7 +84,7 @@ Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code. Use anot
 
 The installer copies the scripts to `~/.claude-usage-page/`, adds two launchd jobs (rebuild every hour; serve the page on 127.0.0.1 only, which serves the page and nothing else) and writes the skill to `~/.claude/skills/my-usage/`. Run it again after pulling to update.
 
-Uninstall with `./uninstall.sh`: it removes the launchd jobs, `~/.claude-usage-page/` and both skills. This also deletes the parse cache (`cache.json`), which holds history for transcripts Claude Code has since cleaned up and can't be rebuilt. To keep it, copy the file out before uninstalling, copy it back after reinstalling, then run `python3 build.py` in that folder.
+Uninstall with `./uninstall.sh`: it removes the launchd jobs, `~/.claude-usage-page/` and both skills. This also deletes the parse cache (`cache-v4.json`), which holds history for transcripts Claude Code has since cleaned up and can't be rebuilt. To keep it, copy the file out before uninstalling, copy it back after reinstalling, then run `python3 build.py` in that folder. (`cache.json`, if present, is the cache of an earlier release, kept so going back to one still works.)
 
 ### Windows
 
@@ -87,7 +100,7 @@ Then open <http://127.0.0.1:8788/>, or type `/my-usage` in Claude Code. Use anot
 
 The installer copies the scripts to `%USERPROFILE%\.claude-usage-page\`, adds two Task Scheduler tasks (`claude-usage-page-build` every hour, `claude-usage-page-serve` at sign-in; both run without a console window) and writes the skill to `%USERPROFILE%\.claude\skills\my-usage\`. Run it again after pulling to update.
 
-Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it removes both tasks, `%USERPROFILE%\.claude-usage-page\` and both skills. This also deletes the parse cache (`cache.json`), which holds history for transcripts Claude Code has since cleaned up and can't be rebuilt. To keep it, copy the file out before uninstalling, copy it back after reinstalling, then run `python build.py` in that folder.
+Uninstall with `powershell -ExecutionPolicy Bypass -File uninstall.ps1`: it removes both tasks, `%USERPROFILE%\.claude-usage-page\` and both skills. This also deletes the parse cache (`cache-v4.json`), which holds history for transcripts Claude Code has since cleaned up and can't be rebuilt. To keep it, copy the file out before uninstalling, copy it back after reinstalling, then run `python build.py` in that folder. (`cache.json`, if present, is the cache of an earlier release, kept so going back to one still works.)
 
 Claude Code's and Codex's own files are never touched on either system; only the two skills are added.
 
