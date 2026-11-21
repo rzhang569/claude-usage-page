@@ -4,8 +4,8 @@ History comes from ~/.claude/stats-cache.json, the same totals `claude /stats`
 shows (it keeps days whose transcripts Claude Code has since cleaned up).
 Anything after that file was last written comes from
 ~/.claude/projects/**/*.jsonl. Both are only read. A parse cache next to this
-script keeps what it has seen, so later cleanups lose nothing. index.html is
-written next to this script. Nothing leaves the computer; deleting this folder
+script keeps what it has seen, so later cleanups lose nothing. index.html, and
+the same data as data.json for the optional sidebar extension, are written next to this script. Nothing leaves the computer; deleting this folder
 removes everything.
 
 Codex comes from ~/.codex/sessions/**/*.jsonl, plus its state database for
@@ -34,6 +34,7 @@ CACHE = os.path.join(HERE, "cache-v4.json")
 # left as it was, so going back to one still works, and read once to carry its history over.
 OLD_CACHE = os.path.join(HERE, "cache.json")
 OUT = os.path.join(HERE, "index.html")
+SNAPSHOT = os.path.join(HERE, "data.json")  # the same data on its own, for the sidebar extension
 TEMPLATE = os.path.join(HERE, "template.html")
 PRICING = os.path.join(HERE, "pricing.json")
 CACHE_VERSION = 4
@@ -884,12 +885,18 @@ def main():
     except Exception as error:  # Trouble with Codex's files must not take the Claude Code page down.
         print(f"skipped Codex: {error!r}", file=sys.stderr)
         data["codex"] = None
+    if not os.path.isdir(BASE):
+        # Its folder is gone: the history stays in the cache in case it comes back, but the page
+        # and the sidebar extension, which hands data.json to whatever calls it, leave it out.
+        data.update(days={}, hours={}, models={}, tasks={}, totals={k: 0 for k in data["totals"]})
 
     write_atomically(CACHE, json.dumps(cache, separators=(",", ":")))
 
+    snapshot = json.dumps(data, separators=(",", ":"))
     with open(TEMPLATE, encoding="utf-8") as f:
-        html = f.read().replace("/*__DATA__*/null", json.dumps(data, separators=(",", ":")).replace("</", "<\\/"))
+        html = f.read().replace("/*__DATA__*/null", snapshot.replace("<", "\\u003c"))
     write_atomically(OUT, html)
+    write_atomically(SNAPSHOT, snapshot)
     print(f"wrote {OUT}: {len(days)} days")
 
 

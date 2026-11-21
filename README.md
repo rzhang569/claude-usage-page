@@ -35,7 +35,7 @@ Only the new part of each transcript is read, so long sessions stay fast.
 
 ## Where the numbers come from
 
-Everything is read locally and nothing leaves your computer.
+The page reads everything locally and sends nothing anywhere. (The optional sidebar card's extension hands the same data to whatever calls it; see [Sidebar card](#sidebar-card-optional-claude-desktop-app).)
 
 ### Claude Code
 
@@ -49,7 +49,7 @@ Totals land within a few percent of `claude /stats`. Two known differences: `sta
 
 A switch at the top shows Codex in the same views. OpenAI's own Codex page adds up all your devices in the cloud; this one shows only what this computer holds, so the two can differ.
 
-The page shows only the tools with history on this computer, so with just one of them there is no switch. A tool you add later appears at the next rebuild, and one whose folder (`~/.claude`, or `~/.codex` / `CODEX_HOME`) you delete disappears; its history stays in the parse cache and returns if the folder does.
+The page shows only the tools with history on this computer, so with just one of them there is no switch. A tool you add later appears at the next rebuild, and one whose folder (`~/.claude`, or `~/.codex` / `CODEX_HOME`) you delete disappears; its history stays in the parse cache, left out of the page and the sidebar card's data, and returns if the folder does.
 
 - Days, models and tasks come from `~/.codex/sessions/`, counting each API response once. Only token counts and timestamps are kept, never what was said.
 - Days are split in UTC, like OpenAI's page, so the Codex view can show a different date from the Claude Code one in the evening. Automatic approval reviews are left out too.
@@ -112,6 +112,27 @@ The installer also adds `$my-usage` to Codex, which replies with a link that ope
 
 `build.py` and `serve.py` are plain Python with no dependencies. Run `python3 build.py` on a timer (cron, a systemd timer) and `python3 serve.py` at login, or just open the generated `index.html` in a browser. Set `CLAUDE_CONFIG_DIR` if your Claude Code data isn't in `~/.claude`.
 
+## Sidebar card (optional, Claude desktop app)
+
+The same card can live in the Claude desktop app's sidebar, so it's one click away without a browser tab. It needs the page installed as above. Two parts:
+
+- **An extension** (`claude-usage-page.mcpb`), a tiny local server with one read-only tool. It hands the card the `data.json` the page's build writes next to `index.html`, after asking the page server to rebuild if the data is over a minute old. It reads nothing else, writes nothing, and connects only to `127.0.0.1`. Whatever calls the tool gets the whole snapshot (your computer's user name, activity, models, tokens and estimated costs): the card, or Claude, if you let it use the tool in a conversation.
+- **The card** (`sidebar.html`), published as a private artifact and pinned. It draws `template.html` itself with that data, so it looks and behaves like the browser page, and refreshes every 10 minutes while open.
+
+To set it up:
+
+1. Run `python3 sidebar/make.py` (on Windows, `py -3 sidebar\make.py`). It writes both files to `dist/`.
+2. Open `dist/claude-usage-page.mcpb` with the Claude app (on macOS, `open -a Claude dist/claude-usage-page.mcpb`) and click **Install**.
+3. In the Claude app's Code tab, ask Claude to publish `dist/sidebar.html` unchanged as an artifact with these capabilities, and to pin it:
+
+   ```json
+   {"mcp": {"servers": [{"server": "host:Claude_Usage_Page", "tools": ["get_usage"]}]}}
+   ```
+
+4. Open the card from the sidebar. The first time, allow it to use the extension.
+
+The card only works inside the Claude desktop app with the extension turned on; anywhere else it says so and points to the browser page. Pins follow your Claude account, so the card also appears on your other computers, but the usage doesn't: each computer shows only its own, and only once the page and the extension are installed there. Until then the card says what's missing. Going back to a release from before the card leaves its data behind, so the card asks for the current version instead of showing numbers that no longer change. To remove it, unpin and delete the artifact, and remove the extension in the app's settings.
+
 ## Tests
 
 Run the standard-library-only test suite from the repository root:
@@ -120,7 +141,7 @@ Run the standard-library-only test suite from the repository root:
 python3 -m unittest -v
 ```
 
-Tests generate fake Claude and Codex data and application copies in temporary directories, set `CLAUDE_CONFIG_DIR` and `CODEX_HOME` there, and start server subprocesses on free localhost ports. They do not use or modify your real data or installed usage page. The tests of the page's own script need Node and are skipped without it.
+Tests generate fake Claude and Codex data and application copies in temporary directories, set `CLAUDE_CONFIG_DIR` and `CODEX_HOME` there, and start server subprocesses on free localhost ports. They do not use or modify your real data or installed usage page. The tests of the page's own script, the sidebar extension and the card's loader need Node and are skipped without it.
 
 ## License
 

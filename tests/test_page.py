@@ -96,6 +96,15 @@ class PageTests(unittest.TestCase):
         payload["pricing"]["partialBefore"] = "2025-11-30"
         self.assertIn("partly estimated", self.page(payload)["elements"]["costline"]["html"])
         self.assertNotIn("partly estimated", self.page(payload, storage={"cu.range": "7"})["elements"]["costline"]["html"])
+    def test_model_names_never_become_markup(self):
+        odd = "claude-<em>x</em>"
+        days = {"2026-01-01": {"m": 3, "tm": {odd: 10}, "sp": [1, 1, 1, 7], "sc": 1}}
+        payload = data(days=days, models={odd: [1, 1, 1, 7]})
+        for tab, boxes in (("overview", ("tiles",)), ("models", ("keys", "chart", "mtable"))):
+            result = self.page(payload, storage={"cu.tab": tab})
+            for box in boxes:
+                self.assertNotIn("<em>", result["elements"][box]["html"], (tab, box))
+        self.assertIn("&lt;em&gt;", self.page(payload, storage={"cu.tab": "models"})["elements"]["mtable"]["html"])
 
     def test_cost_formats_cents_dollars_and_thousands(self):
         for dollars, shown in ((0.004, "<$0.01"), (8.25, "$8.25"), (123.4, "$123"), (12345, "$12.3k"), (2.5e6, "$2.5M")):

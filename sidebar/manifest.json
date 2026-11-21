@@ -1,0 +1,39 @@
+{
+  "manifest_version": "0.3",
+  "name": "claude-usage-page",
+  "display_name": "Claude Usage Page",
+  "version": "0.1.0",
+  "description": "Feeds the Claude Usage Page sidebar card with the usage data its local build already made.",
+  "long_description": "A tiny local server for the Claude Usage Page sidebar artifact. It reads ~/.claude-usage-page/data.json, which Claude Usage Page builds from your local Claude Code and Codex history, and hands it to the card when you open it in Claude Desktop. Before reading, it asks the page server on 127.0.0.1 to rebuild if the data is over a minute old. It reads nothing else and writes nothing. The data (your computer's user name, daily and hourly activity, models, tokens and estimated costs) goes to whatever calls its tool: the card, or Claude if you let it use the tool in a conversation. Needs Claude Usage Page installed (install.sh or install.ps1).",
+  "author": {
+    "name": "rzhang569",
+    "url": "https://github.com/rzhang569"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rzhang569/claude-usage-page"
+  },
+  "homepage": "https://github.com/rzhang569/claude-usage-page",
+  "license": "MIT",
+  "keywords": ["claude-code", "codex", "usage", "stats", "artifact"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"]
+    }
+  },
+  "tools": [
+    {
+      "name": "get_usage",
+      "description": "The usage data Claude Usage Page built on this computer (user name, activity, models, tokens, estimated costs), for its sidebar card. Read-only."
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

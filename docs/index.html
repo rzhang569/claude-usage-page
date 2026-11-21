@@ -235,6 +235,8 @@ const fmt = n => {
   return String(Math.round(n));
 };
 const group = n => n.toLocaleString("en-US");
+// Model names come from local logs: escape them wherever they go into markup.
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 // Dollars: cents under $10, whole dollars under $1,000, then $12.3k and $1.2M like tokens.
 const usd = n => n > 0 && n < 0.01 ? "<$0.01" : n < 10 ? "$" + n.toFixed(2) : n < 1000 ? "$" + Math.round(n)
   : n < 1e6 ? "$" + (n / 1e3).toFixed(1) + "k" : "$" + (n / 1e6).toFixed(1) + "M";
@@ -367,7 +369,7 @@ function compute() {
     hasHours: sum(hours) > 0, longest, current, longestTask, busiest, peak,
     favorite: favorite ? favorite[0] : "—" };
 }
-function tile(k, v) { return `<div class="tile"><div class="k">${k}</div><div class="v" data-tip="${v}">${v}</div></div>`; }
+function tile(k, v) { return `<div class="tile"><div class="k">${k}</div><div class="v" data-tip="${esc(v)}">${esc(v)}</div></div>`; }
 
 function drawOverview(s) {
   document.getElementById("tiles").innerHTML =
@@ -438,7 +440,7 @@ function drawModels(s) {
     .sort((a, b) => sum(s.models[b]) - sum(s.models[a]));
   const palette = PALETTES[theme + (isDark() ? "Dark" : "")];
   const color = Object.fromEntries(RANKED.map((n, i) => [n, palette[i % palette.length]]));
-  document.getElementById("keys").innerHTML = names.map(n => `<span style="--c:${color[n]}">${n}</span>`).join("");
+  document.getElementById("keys").innerHTML = names.map(n => `<span style="--c:${color[n]}">${esc(n)}</span>`).join("");
 
   const days = [];
   for (let d = new Date(window_().start); d <= today; d = addDays(d, 1)) days.push(iso(d));
@@ -473,7 +475,7 @@ function drawModels(s) {
     const used = names.filter(n => o[n]);
     if (used.length) {
       const paid = dollars[days[i]];
-      const text = [shortDate(parse(days[i])), ...used.map(n => `${n}: ${fmt(o[n])}` + (paid[n] ? ` · ${atLeast(paid[n], partly[days[i]][n])}` : ""))].join("&#10;");
+      const text = [shortDate(parse(days[i])), ...used.map(n => `${esc(n)}: ${fmt(o[n])}` + (paid[n] ? ` · ${atLeast(paid[n], partly[days[i]][n])}` : ""))].join("&#10;");
       bars += `<rect x="${i * slot}" y="0" width="${slot}" height="${H}" fill="transparent" data-tip="${text}"/>`;
     }
   });
@@ -504,7 +506,7 @@ function drawModels(s) {
       // Some of this model's tokens had no price: what is shown is a floor, not the cost.
       const spent = partial ? `<td data-tip="Some of this model's tokens couldn't be priced, so this is a floor">${paid ? atLeast(paid, true) : "not priced"}</td>`
                             : `<td>${paid ? usd(paid) : "—"}</td>`;
-      return `<tr><td><span class="swatch" style="background:${color[n] || "var(--muted)"}"></span>${n}</td><td>${fmt(sum(c))}</td>` +
+      return `<tr><td><span class="swatch" style="background:${color[n] || "var(--muted)"}"></span>${esc(n)}</td><td>${fmt(sum(c))}</td>` +
         `<td>${(sum(c) / total * 100).toFixed(1)}%</td><td>${fmt(c[0])}</td><td>${fmt(c[1])}</td><td>${fmt(c[2])}</td><td>${fmt(c[3])}</td>` +
         (priced() ? spent : "") + `</tr>`;
     }).join("");
@@ -663,7 +665,7 @@ function draw() {
   document.getElementById("foot").textContent = `Updated ${when} · ${origin()}`;
 }
 
-[["styles", "style", v => style = v], ["sources", "source", v => { source = v; load(); history.replaceState(null, "", location.pathname); }], ["themes", "theme", v => theme = v],
+[["styles", "style", v => style = v], ["sources", "source", v => { source = v; load(); try { history.replaceState(null, "", location.pathname); } catch {} }], ["themes", "theme", v => theme = v],
  ["modes", "mode", v => mode = v], ["tabs", "tab", v => tab = v], ["ranges", "range", v => range = v]]
   .forEach(([id, key, set]) => document.getElementById(id).addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
