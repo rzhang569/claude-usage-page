@@ -38,11 +38,14 @@ class BuildTests(unittest.TestCase):
         self.assertNotIn("</script", literal)
         self.assertEqual(card.count("</script>"), 1)
 
-    def test_extension_package_holds_exactly_the_manifest_and_server(self):
+    def test_extension_package_holds_exactly_the_manifest_icon_and_server(self):
         with built() as out, zipfile.ZipFile(Path(out) / "claude-usage-page.mcpb") as z:
-            self.assertEqual(sorted(z.namelist()), ["manifest.json", "server/index.js"])
+            self.assertEqual(sorted(z.namelist()), ["icon.png", "manifest.json", "server/index.js"])
             self.assertEqual(z.read("server/index.js"), SERVER.read_bytes())
             manifest = json.loads(z.read("manifest.json"))
+            icon = z.read(manifest["icon"])
+        self.assertEqual(icon[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(int.from_bytes(icon[16:20], "big"), 512)  # width, from the PNG header
         self.assertEqual(manifest["server"]["entry_point"], "server/index.js")
         self.assertEqual([t["name"] for t in manifest["tools"]], ["get_usage"])
         # The card addresses the extension as host:<display name with spaces as underscores>.
