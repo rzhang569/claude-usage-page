@@ -491,6 +491,8 @@ def codex_data(cache, prices=None):
                 whole += total
                 d["tm"][model] = d["tm"].get(model, 0) + total
                 d["sp"] = add(d["sp"], counts)
+                split = d.setdefault("ms", {})  # the day's own split per model
+                split[model] = add(split.get(model, [0, 0, 0, 0]), counts)
                 models[model] = add(models.get(model, [0, 0, 0, 0]), counts)
                 if prices:
                     dollars, unpriced = codex_cost(prices, priced, counts, key) if priced_ok else (0, total)
@@ -781,7 +783,29 @@ def main():
 
     all_models = {}
     totals = {"sessions": 0, "messages": 0}
-    stats_tokens = {}  # per stats-cache.json day and model, for usage with no transcript left to price
+    stats_tokens = {}  # per stats-cache.json day and model, where no transcript is left to count instead
+
+    def count(key, model, counts):
+        d = day(key)
+        d["tm"][model] = d["tm"].get(model, 0) + sum(counts)
+        d["sp"] = [a + b for a, b in zip(d["sp"], counts)]
+        split = d.setdefault("ms", {})  # the day's own split per model
+        split[model] = [a + b for a, b in zip(split.get(model, [0, 0, 0, 0]), counts)]
+        all_models[model] = [a + b for a, b in zip(all_models.get(model, [0, 0, 0, 0]), counts)]
+
+    # Before the cutoff, stats-cache.json days are UTC days. Its token totals run about twice the
+    # responses behind them (it counts some more than once), while Claude Code's own cost tracking
+    # matches one count per response: so where transcripts survive for a day and model, they are
+    # what counts, each response once, and stats-cache.json fills in only where none are left.
+    before = {}
+    for reply in replies.values():
+        # With no cutoff, every transcript overlaps stats-cache.json's days.
+        if reply[0] < cutoff or not cutoff:
+            key = (utc_day(reply[0]), reply[3])
+            before[key] = [a + b for a, b in zip(before.get(key, [0, 0, 0, 0]), reply[4:8])]
+    for (key, model), counts in before.items():
+        if cutoff:
+            count(key, model, counts)
 
     # History up to the moment stats-cache.json was written.
     if stats:
@@ -789,33 +813,27 @@ def main():
             d = day(a["date"])
             d["m"] += a.get("messageCount", 0)
             d["sc"] += a.get("sessionCount", 0)
-            d["split"] = False
+        mix = {model: [u.get("inputTokens", 0), u.get("outputTokens", 0), u.get("cacheCreationInputTokens", 0),
+                       u.get("cacheReadInputTokens", 0)] for model, u in stats.get("modelUsage", {}).items()}
         for a in stats.get("dailyModelTokens", []):
-            d = day(a["date"])
             for model, n in a.get("tokensByModel", {}).items():
+                if (a["date"], model) in before or not n:
+                    continue
+                d = day(a["date"])
                 d["tm"][model] = d["tm"].get(model, 0) + n
+                d["split"] = False  # only a total: its input / output / cache split is estimated
                 by_model = stats_tokens.setdefault(a["date"], {})
                 by_model[model] = by_model.get(model, 0) + n
-            d["split"] = False
-        for model, u in stats.get("modelUsage", {}).items():
-            all_models[model] = [u.get("inputTokens", 0), u.get("outputTokens", 0),
-                                 u.get("cacheCreationInputTokens", 0), u.get("cacheReadInputTokens", 0)]
+                # Split like that model's all-time mix, as the page does for the day.
+                ratio = mix.get(model) if any(mix.get(model, ())) else [0, 0, 0, 1]
+                all_models[model] = [a + b for a, b in zip(all_models.get(model, [0, 0, 0, 0]), apportion(n, ratio))]
         totals["sessions"] = stats.get("totalSessions", 0)
         totals["messages"] = stats.get("totalMessages", 0)
 
     # Everything after it, from transcripts.
     for reply in replies.values():
-        t, session, side, model, i, o, cw, cr = reply[:8]
-        if t < cutoff:
-            continue
-        d = day(local_day(t))
-        counts = (i, o, cw, cr)
-        d["tm"][model] = d["tm"].get(model, 0) + sum(counts)
-        for n, v in enumerate(counts):
-            d["sp"][n] += v
-        acc = all_models.setdefault(model, [0, 0, 0, 0])
-        for n, v in enumerate(counts):
-            acc[n] += v
+        if reply[0] >= cutoff:
+            count(local_day(reply[0]), reply[3], reply[4:8])
     for t, session, side in rows.values():
         if t >= cutoff:
             day(local_day(t))["m"] += 1
@@ -825,16 +843,13 @@ def main():
             day(local_day(lo))["sc"] += 1
             totals["sessions"] += 1
 
-    # Cost at API list prices, from each response once (history included: stats-cache.json has
-    # no per-response detail). Days before the cutoff are UTC days there, so they are here too.
+    # Cost at API list prices, each response once, on the day the page counts it. Usage known
+    # only from stats-cache.json totals has no per-response detail, so it stays unpriced.
     prices = load_json(PRICING, None)
     if prices:
-        covered = set()  # (stats-cache day, model) that still have transcripts behind them
         for reply in replies.values():
             t, model, counts = reply[0], reply[3], reply[4:8]
             key = local_day(t) if t >= cutoff else utc_day(t)
-            if t < cutoff and model not in stats_tokens.get(key, {}):
-                continue  # before the cutoff the page counts stats-cache usage only; this has none
             dollars = claude_cost(prices["claude"], model, *counts, *reply[8:]) if len(reply) > 8 else None
             if dollars is None:
                 # Tokens without a known price stay unpriced; the flat search fee is still known.
@@ -842,15 +857,9 @@ def main():
                 add_cost(day(key), model, fee, sum(counts), sum(counts))
             else:
                 add_cost(day(key), model, dollars, 0, sum(counts))
-            if t < cutoff or not cutoff:  # with no cutoff, stats-cache days and transcripts overlap
-                covered.add((utc_day(t), model))
-        # A model's usage on a stats-cache day with no transcript left has only its totals: count
-        # them as unpriced. (Those totals repeat a response on each line it spans, so they are
-        # never mixed with the transcript counts of what is covered.)
         for key, by_model in stats_tokens.items():
             for model, n in by_model.items():
-                if (key, model) not in covered and n:
-                    add_cost(day(key), model, 0, n, n)
+                add_cost(day(key), model, 0, n, n)
 
     # Hours of day from every transcript row seen (history included), for peak hour.
     hours = {}
@@ -874,6 +883,8 @@ def main():
         "models": all_models,
         "totals": totals,
         "tasks": longest_tasks(files.values()),
+        # Some all-time model totals include days known only as totals, split by estimate.
+        "estimated": any(d["sp"] is None for d in days.values()),
         # History before the cutoff is priced from the transcripts still on this computer, which
         # may not hold all of it; stats-cache.json totals can't tell how much is missing.
         "pricing": prices and {"reviewed": prices.get("reviewed"), "claude": prices["claude"].get("source"),

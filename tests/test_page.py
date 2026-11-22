@@ -190,6 +190,21 @@ class PageTests(unittest.TestCase):
         self.assertTrue(line.startswith("<b>No estimate</b>"), line)
         self.assertIn("100% of tokens not priced", line)
 
+    def test_a_range_uses_each_days_own_split_and_marks_only_estimates(self):
+        # All-time the model is mostly output; this week it was all input.
+        days = {"2026-01-01": {"m": 1, "tm": {OPUS: 100}, "sp": [100, 0, 0, 0], "ms": {OPUS: [100, 0, 0, 0]}, "sc": 1},
+                "2025-11-01": {"m": 1, "tm": {OPUS: 900}, "sp": [0, 900, 0, 0], "ms": {OPUS: [0, 900, 0, 0]}, "sc": 1}}
+        payload = data(days=days, models={OPUS: [100, 900, 0, 0]})
+        week = self.page(payload, storage={"cu.range": "7"})["elements"]["split"]["text"]
+        self.assertEqual(week, "Input 100 · Output 0 · Cache read 0 · Cache write 0")
+        days["2026-01-01"] = {"m": 1, "tm": {OPUS: 100}, "sp": None, "sc": 1}  # known only as a total
+        self.assertTrue(self.page(data(days=days, models={OPUS: [100, 900, 0, 0]}), storage={"cu.range": "7"})
+                        ["elements"]["split"]["text"].startswith("≈ "))
+
+    def test_all_time_says_when_its_split_is_estimated(self):
+        self.assertTrue(self.page(data(estimated=True))["elements"]["split"]["text"].startswith("≈ "))
+        self.assertFalse(self.page(data())["elements"]["split"]["text"].startswith("≈ "))
+
     def test_codex_cost_names_the_openai_api(self):
         codex = {**CODEX, "days": {"2026-01-02": {**CODEX["days"]["2026-01-02"], "c": {"gpt-6.1-sol": 4.2}}}}
         result = self.page(self.priced(codex=codex), storage={"cu.source": "codex"})

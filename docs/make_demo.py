@@ -35,17 +35,17 @@ def demo_tool(today, seed, mix, activity, volume):
             continue
         count, day_sessions = int(rng.lognormvariate(6.2, 0.7) * volume), rng.randint(1, 6)
         tokens = count * rng.randint(70000, 140000)
-        by_model, split, cost = {}, [0, 0, 0, 0], {}
+        by_model, split, cost, own = {}, [0, 0, 0, 0], {}, {}
         for name, share in mix.items():
             value = int(tokens * share * rng.uniform(0.6, 1.4))
-            by_model[name] = value
             parts = [int(value * part) for part in SPLIT]
+            by_model[name], own[name] = sum(parts), parts
             cost[name] = demo_cost(name, parts)
             for i, part in enumerate(parts):
                 models[name][i] += part
                 split[i] += part
         key = day.isoformat()
-        days[key] = {"m": count, "tm": by_model, "sp": split, "sc": day_sessions, "c": cost}
+        days[key] = {"m": count, "tm": by_model, "sp": split, "ms": own, "sc": day_sessions, "c": cost}
         hours[key] = [0] * 24
         for _ in range(count):
             hours[key][min(23, max(0, int(rng.gauss(16, 4))))] += 1
