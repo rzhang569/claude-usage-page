@@ -39,11 +39,12 @@ The page reads everything locally and sends nothing anywhere. (The optional side
 
 ### Claude Code
 
-- History comes from `~/.claude/stats-cache.json`, the file behind `claude /stats`. It keeps totals for days whose transcripts Claude Code has since cleaned up, so long-time users don't lose their early months.
-- Days after that file was last written come from the transcripts in `~/.claude/projects/`, counting each API response once.
+- Tokens come from the transcripts in `~/.claude/projects/`, counting each API response once.
+- History older than the transcripts comes from `~/.claude/stats-cache.json`, the file behind `claude /stats`. It keeps totals for days whose transcripts Claude Code has since cleaned up, so long-time users don't lose their early months. Where transcripts survive for a day and model, they count instead: that file counts some responses more than once (about twice as many tokens on most days we checked), while Claude Code's own cost tracking matches one count per response. The catch: if Claude Code deleted some of a day's transcripts before this page first read them, the ones left stand for that whole day and model, so that day can read low.
+- Messages and sessions up to the day that file was last written come from it; later ones from the transcripts.
 - A parse cache keeps what it has seen, so transcripts deleted later by Claude Code's cleanup still count.
 
-Totals land within a few percent of `claude /stats`. Two known differences: `stats-cache.json` splits days in UTC, so those older days change at UTC midnight while newer days use your local time; and older days only kept per-model totals, so their input / output / cache split is estimated from each model's overall mix (marked with ≈).
+Token totals for older days can therefore be lower than `claude /stats`. Two more differences: `stats-cache.json` splits days in UTC, so those older days change at UTC midnight while newer days use your local time; and days known only from its totals have no input / output / cache split, so theirs is estimated from each model's overall mix (marked with ≈).
 
 ### Codex
 
@@ -64,8 +65,8 @@ This is what the recorded usage would cost if you paid for it through the API at
 
 - Prices live in [`pricing.json`](pricing.json), copied from [Anthropic's](https://platform.claude.com/docs/en/about-claude/pricing) and [OpenAI's](https://developers.openai.com/api/docs/pricing) pricing pages, with the date they were last checked (shown on hover). Edit it and reinstall when a price or model changes.
 - Each API response is priced once, before anything is added up. For Claude that includes 5-minute and 1-hour cache writes, fast mode, US-only inference, Haiku 5.5's long-prompt rate and web searches. For Codex it includes the Fast (formerly Priority) and Ultrafast tiers, the long-context rate over 272K input tokens per request, and $0.01 per hosted web search (page opens and finds in a page are free). Codex cache writes are priced at the 30-minute rate. Ultrafast's promotional rate ends on OpenAI's date in Pacific time. A session started in an older Codex and resumed in a newer one counts only its newer part, in tokens as in cost.
-- Not priced, and shown as a share of the tokens the estimate covers (each response once): models or tiers with no listed price, or a token type with none (only that type); history kept only as totals, such as `stats-cache.json` days with no transcript and Codex threads known only from its state database; transcripts cached before this feature whose files are gone, because their cache durations or tier weren't recorded; and Codex sessions from versions that didn't save the service tier, where Fast can't be told from standard.
-- History before `stats-cache.json` was last written is priced from the transcripts still on this computer. If Claude Code cleaned some up before you installed this page, that part of the estimate is low, and the page says history is partly estimated.
+- Not priced, and shown as a share of the tokens the estimate covers (each response once, except `stats-cache.json` totals, taken as they are): models or tiers with no listed price, or a token type with none (only that type); history kept only as totals, such as `stats-cache.json` days with no transcript and Codex threads known only from its state database; transcripts cached before this feature whose files are gone, because their cache durations or tier weren't recorded; and Codex sessions from versions that didn't save the service tier, where Fast can't be told from standard.
+- History before `stats-cache.json` was last written is counted and priced from the transcripts still on this computer; what only that file's totals know stays unpriced. If Claude Code cleaned some transcripts up before you installed this page, that part can be low, and the page says history is partly estimated.
 - Batch discounts, regional endpoints other than Claude's US-only option, and tool fees other than web search are not included.
 
 ## Install

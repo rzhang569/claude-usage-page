@@ -19,8 +19,8 @@ from tests.fixtures import Fixture, MODEL, OTHER_MODEL, fixed_local_time, row
 
 
 def counts_only(days):
-    """Days without their cost fields (c, u, um, ct), which the cost tests check on their own."""
-    return {k: {f: v for f, v in d.items() if f not in ("c", "u", "um", "ct")} for k, d in days.items()}
+    """Days without their cost fields (c, u, um, ct) and per-model splits (ms), which tests check on their own."""
+    return {k: {f: v for f, v in d.items() if f not in ("c", "u", "um", "ct", "ms")} for k, d in days.items()}
 
 class BuildCase(unittest.TestCase):
     def setUp(self):
@@ -159,12 +159,14 @@ class ParsingTests(BuildCase):
 class AggregationTests(BuildCase):
     def test_fixture_has_exact_daily_counts_and_token_splits(self):
         data = self.run_build()
+        # Jan 1's transcript survives, so it counts instead of stats-cache.json's total for that
+        # day and model, with its split; Jan 2 has only stats totals before the local-day rows.
         self.assertEqual(counts_only(data["days"]), {
-            "2026-01-01": {"m": 40, "tm": {MODEL: 1000}, "sp": None, "sc": 4},
+            "2026-01-01": {"m": 40, "tm": {MODEL: 3996}, "sp": [999, 999, 999, 999], "sc": 4},
             "2026-01-02": {"m": 68, "tm": {MODEL: 2110, OTHER_MODEL: 510}, "sp": None, "sc": 7},
             "2026-01-03": {"m": 2, "tm": {MODEL: 26}, "sp": [5, 6, 7, 8], "sc": 1},
         })
-        self.assertEqual(data["models"], {MODEL: [120, 226, 342, 2448], OTHER_MODEL: [51, 62, 73, 324]})
+        self.assertEqual(data["models"], {MODEL: [1086, 1158, 1241, 2647], OTHER_MODEL: [51, 62, 73, 324]})
         self.assertEqual(data["totals"], {"messages": 110, "sessions": 12})
 
     def test_stats_only_retains_utc_dates_and_totals(self):
@@ -183,7 +185,10 @@ class AggregationTests(BuildCase):
         data = self.run_build()
         self.assertEqual(data["totals"]["messages"], 101)
         self.assertEqual(data["totals"]["sessions"], 11)
-        self.assertEqual(data["models"][MODEL], [107, 200, 300, 2400])
+        # "old" is in stats-cache.json's last UTC day, where its transcript replaces the stats total;
+        # "fresh" comes after. Jan 1 has only the stats total, split like the model's mix.
+        self.assertEqual(data["days"]["2026-01-02"]["tm"], {MODEL: 1000 + 7, OTHER_MODEL: 500})  # "fresh" is Jan 2 locally
+        self.assertEqual(data["models"][MODEL], [33 + 1000 + 7, 67, 100, 800])
         self.assertEqual(data["days"]["2026-01-02"]["m"], 61)
 
     def test_exact_cutoff_midnight_belongs_to_transcripts(self):
@@ -289,7 +294,9 @@ class AggregationTests(BuildCase):
             "modelUsage": {MODEL: {"inputTokens": 12}}, "longestSession": None})
         data = self.run_build()
         self.assertEqual(counts_only(data["days"])["2026-01-01"], {"m": 3, "tm": {MODEL: 12}, "sp": None, "sc": 2})
-        self.assertIsNone(data["days"]["2026-01-02"]["sp"])
+        self.assertEqual((data["days"]["2026-01-01"]["u"], data["days"]["2026-01-01"]["ct"]), (12, 12))  # both entries
+        self.assertTrue(data["estimated"])  # that model's all-time split is an estimate
+        self.assertNotIn("2026-01-02", data["days"])  # an entry with no tokens and no activity adds no day
         self.assertEqual(data["models"][MODEL], [12, 0, 0, 0])
         self.assertEqual(data["totals"], {"messages": 0, "sessions": 0})
 
@@ -308,7 +315,8 @@ class AggregationTests(BuildCase):
         payload = html[len(before):-len(after)]
         self.assertEqual(json.loads(payload)["user"], getpass.getuser())
         self.assertEqual(set(json.loads(payload)),
-                         {"generatedAt", "today", "user", "days", "hours", "models", "totals", "tasks", "codex", "claude", "pricing"})
+                         {"generatedAt", "today", "user", "days", "hours", "models", "totals", "tasks", "codex", "claude", "pricing",
+                          "estimated"})
 
     def test_command_line_build_uses_config_override_and_script_relative_output(self):
         result = subprocess.run([sys.executable, str(self.fixture.app / "build.py")],
@@ -603,8 +611,10 @@ class CacheTests(BuildCase):
         self.assertNotIn(str(self.fixture.sidechain), self.cache()["files"])
 
     def test_advancing_stats_cutoff_does_not_add_cached_rows_twice(self):
-        self.run_build()
+        first = self.run_build()
         self.fixture.stats["lastComputedDate"] = "2026-01-03"
+        # stats-cache.json now has a total for the day the transcripts already cover.
+        self.fixture.stats["dailyModelTokens"].append({"date": "2026-01-03", "tokensByModel": {MODEL: 999999}})
         self.fixture.stats["totalMessages"] = 110
         self.fixture.stats["totalSessions"] = 12
         self.fixture.write_stats()
@@ -612,7 +622,7 @@ class CacheTests(BuildCase):
             data = self.run_build()
         self.assertEqual(data["totals"]["messages"], 110)
         self.assertEqual(data["totals"]["sessions"], 12)
-        self.assertEqual(data["models"][MODEL], [100, 200, 300, 2400])
+        self.assertEqual(data["models"][MODEL], first["models"][MODEL])  # the same responses, counted once
 
 
 class CodexTests(BuildCase):
@@ -1254,20 +1264,33 @@ class CostRegressionTests(BuildCase):
         day = self.codex_day([*self.start("gpt-6.1-sol"), self.tokens("2026-01-03T01:10:00Z", 300000, 0, 0)])
         self.assertAlmostEqual(day["c"]["gpt-6.1-sol"], 300000 * 4 / 1e6)
 
-    def test_a_reply_before_the_cutoff_on_a_day_stats_lacks_is_not_priced(self):
-        self.fixture.write_stats()  # days Jan 1 and Jan 2, cutoff at the end of Jan 2 (UTC)
-        self.only([row("a", "2025-12-30T15:00:00Z", "s"),
-                   row("b", "2025-12-30T15:00:01Z", "s", "assistant", counts=(10**6, 0, 0, 0), model="claude-opus-5-5")])
-        days = self.run_build()["days"]
-        self.assertFalse(any(d.get("c") for d in days.values()))
+    def test_a_reply_before_the_cutoff_that_stats_cache_lacks_still_counts_and_is_priced(self):
+        self.fixture.write_stats()  # days Jan 1 (MODEL only) and Jan 2, cutoff at the end of Jan 2 (UTC)
+        for when, day in (("2025-12-30T15:00:00Z", "2025-12-30"), ("2026-01-01T15:00:00Z", "2026-01-01")):
+            with self.subTest(day=day):  # a day stats-cache.json lacks, then a model it lacks on its day
+                self.only([row("a", when, "s"), row("b", when, "s", "assistant", counts=(10**6, 0, 0, 0), model="claude-opus-5-5")])
+                data = self.run_build()
+                self.assertEqual(data["days"][day]["tm"]["claude-opus-5-5"], 10**6)
+                self.assertAlmostEqual(data["days"][day]["c"]["claude-opus-5-5"], 4.0)
+                self.assertEqual(data["pricing"]["partialBefore"], "2026-01-02")
 
-    def test_a_reply_before_the_cutoff_for_a_model_stats_lacks_is_not_priced(self):
-        self.fixture.write_stats()  # Jan 1 has only MODEL
-        self.only([row("a", "2026-01-01T15:00:00Z", "s"),
-                   row("b", "2026-01-01T15:00:01Z", "s", "assistant", counts=(10**6, 0, 0, 0), model="claude-opus-5-5")])
+    def test_each_day_keeps_its_own_split_per_model(self):
+        self.fixture.write_stats()  # Jan 1: MODEL only as a total
+        self.only([row("a", "2026-01-03T15:00:00Z", "s"),
+                   row("b", "2026-01-03T15:00:01Z", "s", "assistant", counts=(100, 0, 0, 0))])
         data = self.run_build()
-        self.assertNotIn("c", data["days"]["2026-01-01"])
-        self.assertEqual(data["pricing"]["partialBefore"], "2026-01-02")
+        self.assertEqual(data["days"]["2026-01-03"]["ms"], {MODEL: [100, 0, 0, 0]})
+        self.assertNotIn("ms", data["days"]["2026-01-01"])  # known only as a total
+        self.assertTrue(data["estimated"])
+
+    def test_stats_cache_totals_give_way_to_the_transcripts_behind_them(self):
+        # stats-cache.json counts some responses more than once; the transcript counts each once.
+        self.fixture.write_stats()  # Jan 2: MODEL 2000, OTHER_MODEL 500
+        self.only([row("a", "2026-01-02T15:00:00Z", "s"),
+                   row("b", "2026-01-02T15:00:01Z", "s", "assistant", counts=(600, 100, 200, 100))])
+        day = self.run_build()["days"]["2026-01-02"]
+        self.assertEqual(day["tm"], {MODEL: 1000, OTHER_MODEL: 500})
+        self.assertEqual((day["u"], day["ct"]), (500, 1500))  # only the stats-only model is unpriced
 
     def test_dated_snapshots_are_priced_as_their_model(self):
         self.assertEqual(self.build.model_id("gpt-5.4-2026-03-05"), "gpt-5.4")

@@ -315,7 +315,7 @@ function compute() {
   const w = window_();
   const keys = allDates.filter(k => k >= w.startKey && k <= w.endKey && active(k));
   const hours = new Array(24).fill(0), tok = [0, 0, 0, 0], models = {};
-  let msgs = 0, sessions = 0, busiest = null, estimated = false;
+  let msgs = 0, sessions = 0, busiest = null, estimated = false, guessed = false;
   for (const k of keys) {
     const d = DATA.days[k];
     msgs += d.m;
@@ -324,8 +324,11 @@ function compute() {
     for (const [m, v] of Object.entries(d.tm)) {
       const name = modelName(m);
       const acc = models[name] || (models[name] = [0, 0, 0, 0]);
-      const parts = splitOf(m, v);
-      parts.forEach((x, i) => acc[i] += x);
+      // The day's own split for the model where it's known; the rest by its all-time mix (≈).
+      const exact = (d.ms && d.ms[m]) || [0, 0, 0, 0], rest = v - sum(exact);
+      if (rest > 0) guessed = true;
+      exact.forEach((x, i) => acc[i] += x);
+      splitOf(m, Math.max(0, rest)).forEach((x, i) => acc[i] += x);
     }
     if (!busiest || d.m > DATA.days[busiest].m) busiest = k;
   }
@@ -340,7 +343,7 @@ function compute() {
     sessions = DATA.totals.sessions;
     estimated = !!DATA.estimated;
   } else {
-    estimated = keys.some(k => !DATA.days[k].sp);
+    estimated = guessed;
   }
   for (const c of Object.values(models)) c.forEach((v, i) => tok[i] += v);
   const total = sum(tok);
