@@ -20,9 +20,11 @@
 <div id="note">Loading your usage…</div>
 <iframe id="page" title="Claude Code and Codex usage" hidden></iframe>
 <script>
-// The card itself is the same template.html the browser page uses; only its data comes from
-// the Claude Usage Page extension instead of being baked in.
+// The card itself is the same template.html the browser page uses. The extension hands over the
+// copy installed with the page, with the data, so the card follows the installed page; the copy
+// built in here is for an extension from before it did.
 const PAGE = /*__PAGE__*/"";
+const REFRESH = '<meta http-equiv="refresh" content="600">\n';
 const SERVER = "host:Claude_Usage_Page", TOOL = "get_usage";
 const REPO = "https://github.com/rzhang569/claude-usage-page";
 const frame = document.getElementById("page"), note = document.getElementById("note");
@@ -56,9 +58,11 @@ function show(payload) {
   }
   if (shown === data.generatedAt) return;
   shown = data.generatedAt;
+  const page = typeof payload.page === "string" && payload.page.includes("/*__DATA__*/null")
+    ? payload.page.replace(REFRESH, "") : PAGE;  // the card refreshes through the extension, not by reloading
   // Same escaping as build.py: no "<" at all, so the data can't end or open a script.
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
-  frame.srcdoc = PAGE.replace("/*__DATA__*/null", () => json);
+  frame.srcdoc = page.replace("/*__DATA__*/null", () => json);
   frame.hidden = false;
   note.hidden = true;
 }

@@ -117,8 +117,8 @@ The installer also adds `$my-usage` to Codex, which replies with a link that ope
 
 The same card can live in the Claude desktop app's sidebar, so it's one click away without a browser tab. It needs the page installed as above. Two parts:
 
-- **An extension** (`claude-usage-page.mcpb`), a tiny local server with one read-only tool. It hands the card the `data.json` the page's build writes next to `index.html`, after asking the page server to rebuild if the data is over a minute old. It reads nothing else, writes nothing, and connects only to `127.0.0.1`. Whatever calls the tool gets the whole snapshot (your computer's user name, activity, models, tokens and estimated costs): the card, or Claude, if you let it use the tool in a conversation.
-- **The card** (`sidebar.html`), published as a private artifact and pinned. It draws `template.html` itself with that data, so it looks and behaves like the browser page, and refreshes every 10 minutes while open.
+- **An extension** (`claude-usage-page.mcpb`), a tiny local server with one read-only tool. It hands the card the `data.json` the page's build writes next to `index.html`, and the `template.html` installed with the page, after asking the page server to rebuild if the data is over a minute old. It reads nothing else, writes nothing, and connects only to `127.0.0.1`. Whatever calls the tool gets the whole snapshot (your computer's user name, activity, models, tokens and estimated costs): the card, or Claude, if you let it use the tool in a conversation.
+- **The card** (`sidebar.html`), published as a private artifact and pinned. It draws the installed `template.html` with that data, so it looks and behaves like the browser page, follows it when you update the page, and refreshes every 10 minutes while open.
 
 To set it up:
 
@@ -131,6 +131,8 @@ To set it up:
    ```
 
 4. Open the card from the sidebar. The first time, allow it to use the extension.
+
+To update: install the page again as above, and the card follows it. The extension itself changes rarely; when `sidebar/manifest.json` shows a higher version than the one installed, rebuild with `sidebar/make.py`, open the new `claude-usage-page.mcpb` and click **Update**. (The app offers Update only for a higher version; with the same version it offers only Uninstall.) A card published before version 0.2.0 of the extension carries its own copy of the page: publish `dist/sidebar.html` to the same artifact once more, and it follows the page from then on.
 
 The card only works inside the Claude desktop app with the extension turned on; anywhere else it says so and points to the browser page. Pins follow your Claude account, so the card also appears on your other computers, but the usage doesn't: each computer shows only its own, and only once the page and the extension are installed there. Until then the card says what's missing. Going back to a release from before the card leaves its data behind, so the card asks for the current version instead of showing numbers that no longer change. To remove it, unpin and delete the artifact, and remove the extension in the app's settings.
 

@@ -23,7 +23,7 @@ const os = require("os");
 const path = require("path");
 
 const NAME = "claude-usage-page";
-const VERSION = "0.1.0";
+const VERSION = "0.2.1";  // the same as manifest.json
 const TOOL = "get_usage";
 
 function home() {
@@ -80,7 +80,15 @@ async function collect() {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  return { data: JSON.parse(text), refreshed };
+  // The page the card draws: the template installed with the page, so updating the page updates
+  // the card too. A card left from before this falls back to the copy built into it.
+  let page = null;
+  try {
+    page = fs.readFileSync(path.join(home(), "template.html"), "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return { data: JSON.parse(text), refreshed, page };
 }
 
 const TOOL_INFO = {
@@ -88,7 +96,7 @@ const TOOL_INFO = {
   title: "Claude Code and Codex usage",
   description: "The usage data Claude Usage Page built on this computer, for its sidebar card: the computer's " +
     "user name, daily and hourly activity, sessions, tokens per model and, when priced, the estimated cost at " +
-    "API list prices. Read-only.",
+    "API list prices, along with the page that draws it. Read-only.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   annotations: { readOnlyHint: true, openWorldHint: false },
 };

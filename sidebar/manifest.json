@@ -2,10 +2,10 @@
   "manifest_version": "0.3",
   "name": "claude-usage-page",
   "display_name": "Claude Usage Page",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "icon": "icon.png",
   "description": "Feeds the Claude Usage Page sidebar card with the usage data its local build already made.",
-  "long_description": "A tiny local server for the Claude Usage Page sidebar artifact. It reads ~/.claude-usage-page/data.json, which Claude Usage Page builds from your local Claude Code and Codex history, and hands it to the card when you open it in Claude Desktop. Before reading, it asks the page server on 127.0.0.1 to rebuild if the data is over a minute old. It reads nothing else and writes nothing. The data (your computer's user name, daily and hourly activity, models, tokens and estimated costs) goes to whatever calls its tool: the card, or Claude if you let it use the tool in a conversation. Needs Claude Usage Page installed (install.sh or install.ps1).",
+  "long_description": "A tiny local server for the Claude Usage Page sidebar artifact. It reads ~/.claude-usage-page/data.json, which Claude Usage Page builds from your local Claude Code and Codex history, and the page template installed beside it, and hands both to the card when you open it in Claude Desktop. Before reading, it asks the page server on 127.0.0.1 to rebuild if the data is over a minute old. It reads nothing else and writes nothing. The data (your computer's user name, daily and hourly activity, models, tokens and estimated costs) goes to whatever calls its tool: the card, or Claude if you let it use the tool in a conversation. Needs Claude Usage Page installed (install.sh or install.ps1).",
   "author": {
     "name": "rzhang569",
     "url": "https://github.com/rzhang569"

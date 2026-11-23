@@ -1,4 +1,5 @@
 """The optional Claude Desktop sidebar card: its build, its extension and its loader."""
+import hashlib
 import http.server
 import json
 import os
@@ -53,6 +54,24 @@ class BuildTests(unittest.TestCase):
         self.assertIn(f'"host:{manifest["display_name"].replace(" ", "_")}"', loader)
 
 
+class VersionTests(unittest.TestCase):
+    """An installed extension updates only to a higher version: one that changes must say so."""
+
+    def test_a_changed_extension_has_a_new_version(self):
+        manifest = json.loads((ROOT / "sidebar" / "manifest.json").read_text(encoding="utf-8"))
+        self.assertIn(f'const VERSION = "{manifest["version"]}";', SERVER.read_text(encoding="utf-8"))
+        lock = json.loads((ROOT / "sidebar" / "version.lock.json").read_text(encoding="utf-8"))
+        shipped = hashlib.sha256()
+        for name in ("manifest.json", "icon.png", "server/index.js"):
+            shipped.update((ROOT / "sidebar" / name).read_bytes())
+        if shipped.hexdigest() != lock["sha256"]:
+            self.assertNotEqual(manifest["version"], lock["version"],
+                                "the extension changed: raise its version in manifest.json and server/index.js")
+            self.fail("new version: record it in sidebar/version.lock.json with "
+                      f'{{"version": "{manifest["version"]}", "sha256": "{shipped.hexdigest()}"}}')
+        self.assertEqual(manifest["version"], lock["version"], "the version changed: record it in sidebar/version.lock.json")
+
+
 @unittest.skipUnless(NODE, "needs Node to run the extension")
 class ExtensionTests(unittest.TestCase):
     def setUp(self):
@@ -88,7 +107,7 @@ class ExtensionTests(unittest.TestCase):
     def test_hands_over_data_json_whole_even_past_the_pipe_buffer(self):
         data = {"generatedAt": "2026-11-20T12:00:00", "days": {f"d{i}": {"m": i, "pad": "x" * 200} for i in range(600)}}
         (self.home / "data.json").write_text(json.dumps(data), encoding="utf-8")
-        self.assertEqual(self.payload(), {"data": data, "refreshed": False})
+        self.assertEqual(self.payload(), {"data": data, "refreshed": False, "page": None})
 
     def test_missing_data_says_to_install_the_page(self):
         result = self.call()
@@ -104,6 +123,11 @@ class ExtensionTests(unittest.TestCase):
         result = self.call()
         self.assertTrue(result["isError"])
         self.assertIn("Reinstall the current Claude Usage Page", result["content"][0]["text"])
+
+    def test_hands_over_the_installed_page_with_the_data(self):
+        (self.home / "data.json").write_text('{"generatedAt": "a", "days": {}}', encoding="utf-8")
+        (self.home / "template.html").write_text("<p>page /*__DATA__*/null</p>", encoding="utf-8")
+        self.assertEqual(self.payload()["page"], "<p>page /*__DATA__*/null</p>")
 
     def test_unknown_tools_and_methods_are_errors(self):
         replies = self.talk({"id": 1, "method": "tools/call", "params": {"name": "rm", "arguments": {}}},
@@ -133,7 +157,7 @@ class ExtensionTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         (self.home / "port").write_text(str(server.server_address[1]), encoding="ascii")
         (self.home / "data.json").write_text('{"generatedAt": "stale", "days": {}}', encoding="utf-8")
-        self.assertEqual(self.payload(), {"data": {"generatedAt": "fresh", "days": {}}, "refreshed": True})
+        self.assertEqual(self.payload(), {"data": {"generatedAt": "fresh", "days": {}}, "refreshed": True, "page": None})
         self.assertEqual(hits, ["/"])
         Page.status = 503
         self.assertFalse(self.payload()["refreshed"])
@@ -164,6 +188,17 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(shown["watches"], [{"server": "host:Claude_Usage_Page", "tool": "get_usage", "args": None,
                                              "options": {"cache": {"staleTime": 60000, "gcTime": 604800000},
                                                          "refetchInterval": 600000}}])
+
+    def test_the_card_draws_the_page_the_extension_sends_else_its_own(self):
+        data = {"generatedAt": "a", "days": {}}
+        sent = '<meta http-equiv="refresh" content="600">\n<p>newer page</p><script>const ALL = /*__DATA__*/null;</script>'
+        newer = self.show({"events": [{"data": {"data": data, "page": sent}}]})["page"]["srcdoc"]
+        self.assertTrue(newer.startswith("<p>newer page</p>"))  # its self-reload taken out
+        self.assertIn('const ALL = {"generatedAt":"a","days":{}};', newer)
+        for page in (None, "not a page"):  # an extension from before, or something else: the built-in copy
+            own = self.show({"events": [{"data": {"data": data, "page": page}}]})["page"]["srcdoc"]
+            self.assertNotIn("newer page", own)
+            self.assertIn('"generatedAt":"a"', own)
 
     def test_each_failure_says_what_to_do(self):
         cases = {
