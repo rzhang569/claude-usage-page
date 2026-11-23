@@ -572,6 +572,45 @@ class CacheTests(BuildCase):
         self.fixture.sidechain.unlink()  # its history now lives only in the earlier release's cache
         self.assertEqual(self.run_build()["totals"]["messages"], 110)
 
+    def test_the_cache_keeps_no_transcript_text(self):
+        secret = "purple-elephant-7731"
+        self.fixture.write_transcript("talk.jsonl", [row("t1", "2026-01-03T15:00:00Z", "t", content=secret),
+                                                      row("t2", "2026-01-03T15:00:01Z", "t", "assistant")])
+        self.run_build()
+        raw = Path(self.build.CACHE).read_text(encoding="utf-8")
+        for form in (secret, secret.encode().hex()):  # neither as text nor as the hex of its bytes
+            self.assertNotIn(form, raw)
+        self.assertNotIn('"tail"', raw)
+
+    def test_old_raw_tails_are_scrubbed_and_still_tell_appends_from_rewrites(self):
+        self.run_build()
+        cache = self.cache()
+        path = str(self.fixture.sidechain)
+        entry = cache["files"][path]
+        with open(path, "rb") as f:  # as an earlier version kept it: the raw bytes, in hex
+            f.seek(entry["offset"] - entry["taillen"])
+            entry["tail"] = f.read(entry["taillen"]).hex()
+        del entry["taillen"], entry["tailsum"]
+        cache.pop("scrubbed")  # as a cache from before this clean-up
+        Path(self.build.CACHE).write_text(json.dumps(cache), encoding="utf-8")
+        old = self.as_v3(cache)
+        old["files"][path]["tail"] = entry["tail"]
+        Path(self.build.OLD_CACHE).write_text(json.dumps(old), encoding="utf-8")
+        os.utime(self.build.OLD_CACHE, (1, 1))
+        with mock.patch.object(self.build, "parse", wraps=self.build.parse) as parse:
+            self.run_build()
+        self.assertEqual(parse.call_count, 0)  # the scrubbed check still matches the unchanged file
+        for name in (self.build.CACHE, self.build.OLD_CACHE):
+            self.assertNotIn('"tail"', Path(name).read_text(encoding="utf-8"), name)
+        self.assertEqual(os.stat(self.build.OLD_CACHE).st_mtime, 1)  # its time kept, so it isn't merged again
+        self.assertEqual(json.loads(Path(self.build.OLD_CACHE).read_text(encoding="utf-8"))["v"], 3)
+        # A rewrite of the same size is still caught.
+        text = Path(path).read_bytes()
+        Path(path).write_bytes(text[:-30] + b" " * 29 + b"\n")
+        with mock.patch.object(self.build, "parse", wraps=self.build.parse) as parse:
+            self.run_build()
+        self.assertEqual(parse.call_args.args[1], None)  # read from the start, not resumed
+
     def test_corrupt_or_old_cache_is_rebuilt(self):
         for content in ("{invalid", json.dumps({"v": -1, "files": {"bogus": {}}})):
             with self.subTest(content=content):

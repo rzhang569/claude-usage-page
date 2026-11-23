@@ -14,6 +14,7 @@ counts are read, never conversations.
 """
 import copy
 import datetime as dt
+import hashlib
 import getpass
 import glob
 import json
@@ -38,7 +39,7 @@ SNAPSHOT = os.path.join(HERE, "data.json")  # the same data on its own, for the 
 TEMPLATE = os.path.join(HERE, "template.html")
 PRICING = os.path.join(HERE, "pricing.json")
 CACHE_VERSION = 4
-TAIL = 256  # bytes kept to check that a transcript was appended to, not rewritten
+TAIL = 256  # bytes checked to tell a transcript appended to from one rewritten (only their hash is kept)
 COPY_WINDOW = 5  # seconds: a fork's copy of its parent's history is written within this of the fork
 IDLE = 1800  # a gap this long ends a task: waiting on the user, or the computer slept
 # Session file rows worth decoding; the rest can be large and hold nothing to count.
@@ -74,20 +75,38 @@ def add(a, b):
     return [x + y for x, y in zip(a, b)]
 
 
+def fingerprint(data):
+    return hashlib.sha256(data).hexdigest()
+
+
 def mark(f, offset):
-    """Where parsing stopped, for resume_point to check next time."""
+    """Where parsing stopped, for resume_point to check next time: the length and a hash of the
+    bytes just before it, never the bytes themselves, so the cache keeps no transcript text."""
     f.seek(max(0, offset - TAIL))
-    return {"offset": offset, "tail": f.read(offset - f.tell()).hex()}
+    tail = f.read(offset - f.tell())
+    return {"offset": offset, "taillen": len(tail), "tailsum": fingerprint(tail)}
 
 
 def resume_point(f, held):
     """Where a grown transcript can be picked up, or 0 if its known bytes are not still there."""
-    offset = (held or {}).get("offset", 0)
-    tail = bytes.fromhex((held or {}).get("tail", ""))
-    if not offset or offset < len(tail) or "k" not in held:
+    held = held or {}
+    offset, size = held.get("offset", 0), held.get("taillen", 0)
+    if not offset or offset < size or "k" not in held or "tailsum" not in held:
         return 0
-    f.seek(offset - len(tail))
-    return offset if f.read(len(tail)) == tail else 0
+    f.seek(offset - size)
+    return offset if fingerprint(f.read(size)) == held["tailsum"] else 0
+
+
+def scrub(cache):
+    """Replaces the raw tail bytes earlier versions kept with their length and hash. True if any."""
+    changed = False
+    for name in ("files", "codex"):
+        for entry in (cache.get(name) or {}).values():
+            if isinstance(entry, dict) and "tail" in entry:
+                tail = bytes.fromhex(entry.pop("tail") or "")
+                entry.update(taillen=len(tail), tailsum=fingerprint(tail))
+                changed = True
+    return changed
 
 
 def is_prompt(row):
@@ -748,6 +767,19 @@ def load_cache():
                         mine[path] = {**entry, "r": {**entry["r"], **mine[path]["r"]}}
                     else:
                         mine[path] = {**mine[path], "surplus": codex_surplus(entry, mine[path])}
+    scrub(cache)
+    # The earlier release's cache gets the same clean-up once. It still reads it: with no tail
+    # bytes it just stops checking a grown file before reading on. Its time stays as it was.
+    if not cache.get("scrubbed") and os.path.exists(OLD_CACHE):
+        old = old if old is not None else load_json(OLD_CACHE, None)
+        if isinstance(old, dict) and scrub(old):
+            try:
+                when = os.stat(OLD_CACHE)
+                write_atomically(OLD_CACHE, json.dumps(old, separators=(",", ":")))
+                os.utime(OLD_CACHE, ns=(when.st_atime_ns, when.st_mtime_ns))
+            except OSError:
+                return cache  # try again next build
+    cache["scrubbed"] = True
     return cache
 
 
