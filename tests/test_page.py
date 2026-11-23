@@ -77,8 +77,8 @@ class PageTests(unittest.TestCase):
         # 600 of the 4,100 tokens the estimate covers are unpriced (ct, not the page's token totals).
         self.assertEqual(html.unescape(re.sub(r"<[^>]+>", "", line["html"])),
                          "≈ $1.2k at Claude API list prices · 15% of tokens not priced")
-        self.assertIn("Jan 1 — 12 · $1.2k", self.tips(result, "heat"))
-        self.assertIn("Dec 31 — 7 · ≥ $8.25", self.tips(result, "heat"))  # 600 tokens there had no price
+        self.assertIn("Jan 1 — 12 messages · $1.2k", self.tips(result, "heat"))
+        self.assertIn("Dec 31 — 7 messages · ≥ $8.25", self.tips(result, "heat"))  # 600 tokens there had no price
         table = self.page(self.priced(), storage={"cu.tab": "models"})["elements"]["mtable"]["html"]
         self.assertIn(">API cost</th>", table)
         self.assertIn("<td>$1.2k</td>", table)
@@ -223,6 +223,17 @@ class PageTests(unittest.TestCase):
         self.assertNotIn("peak 1/day", empty)
         self.assertIn("Today · peak", chart)
 
+    def test_the_busiest_day_and_heatmap_say_they_count_messages(self):
+        # Classic ranks days by messages; Profile's peak day counts tokens, so the unit is spelled out.
+        en = self.page()
+        self.assertIn("Most messages: 12", self.tips(en, "meta"))
+        self.assertIn("Dec 31 — 7 messages", self.tips(en, "heat"))
+        zh = self.page(language="zh-CN")
+        self.assertIn("消息最多：12 条", self.tips(zh, "meta"))
+        self.assertIn("12月31日 — 7 条消息", self.tips(zh, "heat"))
+        one = data(days={"2026-01-01": {"m": 1, "tm": {OPUS: 10}, "sp": [1, 1, 1, 7], "sc": 1}})
+        self.assertIn("Jan 1 — 1 message", self.tips(self.page(one), "heat"))
+
     def test_codex_cost_names_the_openai_api(self):
         codex = {**CODEX, "days": {"2026-01-02": {**CODEX["days"]["2026-01-02"], "c": {"gpt-6.1-sol": 4.2}}}}
         result = self.page(self.priced(codex=codex), storage={"cu.source": "codex"})
@@ -230,8 +241,8 @@ class PageTests(unittest.TestCase):
 
     def test_heatmap_hover_is_the_date_and_count_with_no_future_days(self):
         tips = self.tips(self.page(), "heat")
-        self.assertEqual(tips[-1], "Jan 1 — 12")
-        self.assertIn("Dec 31 — 7", tips)
+        self.assertEqual(tips[-1], "Jan 1 — 12 messages")
+        self.assertIn("Dec 31 — 7 messages", tips)
         self.assertFalse([t for t in tips if t.startswith("Jan 2")])
 
     def test_active_days_has_a_denominator_only_for_fixed_ranges(self):
@@ -564,7 +575,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(found["Longest task"], "1h 27m")
         self.assertEqual(found["Favorite model"], "GPT-6.1 Sol")
         self.assertEqual(found["Current streak"], "1 day")
-        self.assertEqual(self.tips(result, "heat")[-1], "Jan 2 — 2")
+        self.assertEqual(self.tips(result, "heat")[-1], "Jan 2 — 2 messages")
 
     def test_codex_all_time_split_is_marked_estimated(self):
         result = self.page(data(codex=CODEX), clicks=[("sources", {"source": "codex"})])

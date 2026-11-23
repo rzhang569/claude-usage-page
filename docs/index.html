@@ -377,7 +377,7 @@ function compute() {
     hasHours: sum(hours) > 0, longest, current, longestTask, busiest, peak,
     favorite: favorite ? favorite[0] : "—" };
 }
-function tile(k, v) { return `<div class="tile"><div class="k">${k}</div><div class="v" data-tip="${esc(v)}">${esc(v)}</div></div>`; }
+function tile(k, v, tip = v) { return `<div class="tile"><div class="k">${k}</div><div class="v" data-tip="${esc(tip)}">${esc(v)}</div></div>`; }
 
 function drawOverview(s) {
   document.getElementById("tiles").innerHTML =
@@ -392,7 +392,8 @@ function drawOverview(s) {
     tile(P.longest, P.days(s.longest)) +
     tile(P.current, P.days(s.current)) +
     tile(P.task, s.longestTask ? P.duration(s.longestTask) : "—") +
-    tile(P.busiest, busy);
+    // Busiest by messages, like the heatmap below; Profile's peak day counts tokens instead.
+    tile(P.busiest, busy, s.busiest ? P.mostMsgs(DATA.days[s.busiest].m) : busy);
   document.getElementById("less").textContent = P.less;
   document.getElementById("more").textContent = P.more;
 
@@ -409,7 +410,7 @@ function drawOverview(s) {
     const out = d > today ? " out" : "";
     const dim = (k < w.startKey && n) ? ' style="opacity:.35"' : "";
     const spent = priced() && DATA.days[k] && DATA.days[k].c ? sum(Object.values(DATA.days[k].c)) : 0;
-    const label = P.date(d) + " — " + group(n) +
+    const label = P.date(d) + " — " + P.msgs(n) +
       (spent ? " · " + atLeast(spent, DATA.days[k].u > 0) : "");
     cells += `<div class="cell ${lvl}${out}"${out ? "" : ` data-tip="${label}"`}${dim}></div>`;
   }
@@ -564,6 +565,7 @@ const EN = {
   cost: "$ API cost", costLabel: "API cost estimate", less: "Less", more: "More",
   sessions: "Sessions", messages: "Messages", activeDays: "Active days", peakHour: "Peak hour",
   favorite: "Favorite model", busiest: "Most active day", hour: hourLabel,
+  msgs: n => `${group(n)} ${n === 1 ? "message" : "messages"}`, mostMsgs: n => `Most messages: ${group(n)}`,
   money: (n, floor) => floor ? floorUsd(n) : usd(n),
   split: t => `Input ${t[0]} · Output ${t[1]} · Cache read ${t[3]} · Cache write ${t[2]}`,
   priceLine: (v, api) => `${v ? `≈ <b>${v}</b>` : "<b>No estimate</b>"} at ${api} list prices`,
@@ -605,6 +607,7 @@ const ZH = {
   cost: "$ API 费用", costLabel: "API 费用估算", less: "少", more: "多",
   sessions: "会话", messages: "消息", activeDays: "活跃天数", peakHour: "最活跃时段",
   favorite: "最常用的模型", busiest: "最活跃的一天", hour: h => `${h} 点`, money: zhMoney,
+  msgs: n => `${group(n)} 条消息`, mostMsgs: n => `消息最多：${group(n)} 条`,
   split: t => `输入 ${t[0]} · 输出 ${t[1]} · 缓存读取 ${t[3]} · 缓存写入 ${t[2]}`,
   priceLine: (v, api) => `按 ${api} 标价估算，${v ? `约 <b>${v}</b>` : "<b>无法估算</b>"}`,
   unpriced: p => ` · 有 ${p} 的 Token 未计入费用估算`, partly: d => ` · 截至 ${d} 的历史为部分估算`,
