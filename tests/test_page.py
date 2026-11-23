@@ -205,6 +205,24 @@ class PageTests(unittest.TestCase):
         self.assertTrue(self.page(data(estimated=True))["elements"]["split"]["text"].startswith("≈ "))
         self.assertFalse(self.page(data())["elements"]["split"]["text"].startswith("≈ "))
 
+    def test_chinese_reads_dollars_in_full(self):
+        for dollars, partial, shown in ((3210.4, False, "约 <b>3,210 美元</b>"), (8.256, False, "约 <b>8.26 美元</b>"),
+                                        (0.004, False, "约 <b>不到 0.01 美元</b>")):
+            days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10}, "sp": [1, 1, 1, 7], "sc": 1, "c": {OPUS: dollars}, "ct": 10}}
+            line = self.page(data(days=days, pricing={"reviewed": "x"}), language="zh-CN")["elements"]["costline"]["html"]
+            self.assertIn(shown, line, dollars)
+        days = {"2026-01-01": {"m": 1, "tm": {OPUS: 10}, "sp": [1, 1, 1, 7], "sc": 1, "c": {OPUS: 10.99}, "u": 5, "ct": 10,
+                               "um": {OPUS: 5}}}
+        table = self.page(data(days=days, pricing={"reviewed": "x"}), language="zh-CN", storage={"cu.tab": "models"})
+        self.assertIn(">≥ 10 美元</td>", table["elements"]["mtable"]["html"])  # a floor, rounded down
+
+    def test_a_range_with_no_usage_says_its_peak_is_zero(self):
+        chart = self.page(storage={"cu.tab": "models", "cu.range": "7"}, search="")["elements"]["chart"]["html"]
+        empty = self.page(data(days={}, models={}), storage={"cu.tab": "models"})["elements"]["chart"]["html"]
+        self.assertIn("peak 0/day", empty)
+        self.assertNotIn("peak 1/day", empty)
+        self.assertIn("Today · peak", chart)
+
     def test_codex_cost_names_the_openai_api(self):
         codex = {**CODEX, "days": {"2026-01-02": {**CODEX["days"]["2026-01-02"], "c": {"gpt-6.1-sol": 4.2}}}}
         result = self.page(self.priced(codex=codex), storage={"cu.source": "codex"})
@@ -293,11 +311,11 @@ class PageTests(unittest.TestCase):
         self.assertEqual(self.stats(english)[3], ("3 days", "Longest streak"))
         self.assertIn("Updated", english["elements"]["pfoot"]["text"])
 
-    def words(self, result):
+    def words(self, result, skip=()):
         # Everything a reader can see: element text, plus the hover tips inside the markup.
         seen = []
-        for el in result["elements"].values():
-            if el["hidden"]:
+        for key, el in result["elements"].items():
+            if el["hidden"] or key.startswith(skip):
                 continue
             seen += [el["text"], re.sub(r"<[^>]+>", " ", el["html"])] + re.findall(r'data-tip="([^"]*)"', el["html"])
         return html.unescape(" ".join(seen + [result["title"]]))
@@ -308,23 +326,41 @@ class PageTests(unittest.TestCase):
             for look in ("auto", "light", "dark"):
                 chinese = self.page(both, language="zh-CN",
                                     storage={"cu.style": "profile", "cu.mode": mode, "cu.appearance": look})
-                left = re.sub(r"Claude Code|Claude|Codex|Token|@?demo|DE", "", self.words(chinese))
+                left = re.sub(r"Claude Code|Claude|Codex|Token|API|@?demo|DE", "", self.words(chinese))
                 self.assertNotRegex(left, r"[A-Za-z]{2,}", (mode, look))
                 self.assertEqual(chinese["lang"], "zh-CN")
         labels = lambda r: [r["elements"]["selector:[data-style=%s]" % k]["text"] for k in ("card", "profile")]
         self.assertEqual(labels(self.page(language="zh-CN", storage={"cu.style": "profile"})), ["经典", "个人主页"])
-        self.assertEqual(labels(self.page(language="zh-CN")), ["Classic", "Profile"])
+        self.assertEqual(labels(self.page(language="zh-CN")), ["经典", "个人主页"])
         self.assertEqual(labels(self.page(language="en-US", storage={"cu.style": "profile"})), ["Classic", "Profile"])
         cjk = r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]"
-        for language in ("en-US", "zh-CN"):  # Classic stays English even on a Chinese system.
-            for tab in ("overview", "models"):
-                classic = self.page(both, language=language, storage={"cu.tab": tab})
-                self.assertNotRegex(self.words(classic), cjk, (language, tab))
-                self.assertEqual((classic["lang"], classic["title"]), ("en", "Claude Code Usage"))
+        # Classic follows the language too, prices, notes and all; model names stay as they are.
+        codex = {**CODEX, "days": {k: {**d, "c": {"gpt-6.1-sol": 4.2}, "ct": 100} for k, d in CODEX["days"].items()}}
+        priced = data(codex=codex, pricing={"reviewed": "2026-11-20", "partialBefore": "2025-12-31"})
+        priced["days"]["2026-01-01"].update(c={OPUS: 12.5}, u=10, ct=100, um={OPUS: 10})
+        for tab in ("overview", "models"):
+            for source in ("claude", "codex"):
+                chinese = self.page(priced, language="zh-CN", storage={"cu.tab": tab, "cu.source": source})
+                profile_only = ("selector:[data-mode=",)  # inside Profile, hidden here; the harness can't tell
+                left = re.sub(r"Claude Code|Claude|Codex|OpenAI|Token|API|Opus|Sonnet|Haiku|GPT|Sol|@?demo", "",
+                              self.words(chinese, profile_only))
+                self.assertNotRegex(left, r"[A-Za-z]{2,}", (tab, source))
+                self.assertEqual(chinese["lang"], "zh-CN")
+                english = self.page(priced, language="en-US", storage={"cu.tab": tab, "cu.source": source})
+                self.assertNotRegex(self.words(english, profile_only), cjk, (tab, source))
+        self.assertEqual(self.page(both, language="zh-CN")["title"], "Claude Code 用量")
+        # Words the scan above can't see: the cost line's hover text and the chart's label.
+        line = self.page(priced, language="zh-CN")["elements"]["costline"]
+        self.assertTrue(line["dataset"]["tip"].startswith("按 Claude API 标价估算这些用量的费用"))
+        self.assertIn("约 <b>13 美元</b>", line["html"])  # whole dollars from $10, as in English
+        chart = self.page(priced, language="zh-CN", storage={"cu.tab": "models"})["elements"]["chart"]["html"]
+        self.assertIn('aria-label="每天各模型的 Token 用量"', chart)
+        codex_line = self.page(priced, language="zh-CN", storage={"cu.source": "codex"})["elements"]["costline"]["html"]
+        self.assertIn("按 OpenAI API 标价估算", codex_line)
         english = self.page(both, language="en-US", storage={"cu.style": "profile", "cu.mode": "weekly"})
         self.assertNotRegex(self.words(english), cjk)
 
-    def test_profile_in_chinese_leaves_no_english_written_in_the_markup(self):
+    def test_chinese_leaves_no_english_written_in_the_markup(self):
         # Words written into template.html itself, which the harness only sees once the script sets them.
         from html.parser import HTMLParser
         found = []
@@ -341,12 +377,16 @@ class PageTests(unittest.TestCase):
                     self.stack.pop()
 
             def handle_data(self, text):
-                if text.strip() and self.stack and any(a.get("id") == "profile" or a.get("class") == "top" for a in self.stack):
+                if text.strip() and self.stack:
                     found.append((text.strip(), [dict(a) for a in self.stack]))
 
         template = (ROOT / "template.html").read_text(encoding="utf-8")
-        Static().feed(template[template.index("<main>"):template.index('<div class="card" id="cardview">')])
-        result = self.page(data(codex=CODEX), language="zh-CN", storage={"cu.style": "profile"})
+        Static().feed(template[template.index("<main>"):template.index("</main>")])
+        for style in ("profile", "card"):
+            self.check_markup(found, style)
+
+    def check_markup(self, found, style):
+        result = self.page(data(codex=CODEX), language="zh-CN", storage={"cu.style": style})
         shown = result["elements"]
 
         def key(attrs):
@@ -358,12 +398,12 @@ class PageTests(unittest.TestCase):
         self.assertTrue(found)
         for text, stack in found:
             if any(shown.get(a.get("id"), {}).get("hidden") for a in stack if a.get("id")):
-                continue  # inside something the Profile view hides
+                continue  # inside something this view hides
             if re.fullmatch(r"Claude Code|Codex", text):
                 continue  # product names
             el = shown.get(key(stack[-1]))
-            self.assertIsNotNone(el, f"{text!r} is never rewritten for Chinese")
-            self.assertNotRegex(re.sub(r"Token", "", el["text"]), r"[A-Za-z]{2,}", text)
+            self.assertIsNotNone(el, f"{text!r} is never rewritten for Chinese ({style})")
+            self.assertNotRegex(re.sub(r"Token|API", "", el["text"]), r"[A-Za-z]{2,}", (style, text))
 
     def test_profile_language_button_picks_auto_english_or_chinese(self):
         button = lambda r: r["elements"]["language"]["text"]
@@ -398,7 +438,8 @@ class PageTests(unittest.TestCase):
         picked = self.page(language="en-US", storage={**profile, "cu.lang": "zh"})
         self.assertEqual(said(picked, "language"), "语言：中文，点击切换")
         classic = self.page(language="zh-CN", storage={"cu.appearance": "light"})
-        self.assertEqual(said(classic, "appearance"), "Appearance: Light, click to change")
+        self.assertEqual(said(classic, "appearance"), "外观：浅色，点击切换")  # Classic follows the language too
+        self.assertEqual(said(classic, "costbtn"), "API 费用估算")
         # Neither button claims to be a pressed toggle.
         template = (ROOT / "template.html").read_text(encoding="utf-8")
         self.assertNotRegex(template, r'id="(language|appearance)"[^>]*aria-pressed')
@@ -412,11 +453,25 @@ class PageTests(unittest.TestCase):
                 self.assertEqual(result["elements"]["appearance"]["attrs"]["aria-label"],
                                  "Appearance: Auto, click to change")
 
-    def test_classic_hides_the_language_button_and_stays_english(self):
-        classic = self.page(language="en-US", storage={"cu.lang": "zh"})
-        self.assertTrue(classic["elements"]["langseg"]["hidden"])
-        self.assertNotRegex(self.words(classic), r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]")
-        self.assertFalse(self.page(storage={"cu.style": "profile"})["elements"]["langseg"]["hidden"])
+    def test_the_language_button_shows_in_both_views_and_rules_both(self):
+        cjk = r"[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]"
+        for style in ("card", "profile"):
+            chinese = self.page(language="en-US", storage={"cu.style": style, "cu.lang": "zh"})
+            self.assertEqual(chinese["elements"]["language"]["text"], "🌐\ufe0e 中文", style)
+            english = self.page(language="zh-CN", storage={"cu.style": style, "cu.lang": "en"})
+            self.assertNotRegex(self.words(english), cjk, style)
+        # Nothing hides it: not the markup, not the script.
+        template = (ROOT / "template.html").read_text(encoding="utf-8")
+        self.assertRegex(template, r'<div class="seg" id="langseg">')
+        self.assertNotRegex(template, r'langseg"\)\.hidden|id="langseg"[^>]*hidden')
+        # From Classic on an English system: Auto, English, then Chinese, and Classic follows.
+        picked = self.page(language="en-US", clicks=[("language", {}), ("language", {})])
+        self.assertEqual(picked["storage"]["cu.lang"], "zh")
+        self.assertIn("会话", self.tiles(picked))
+        # One click from Chinese goes back to Auto, which follows the system language.
+        back = self.page(language="en-US", storage={"cu.lang": "zh"}, clicks=[("language", {})])
+        self.assertEqual(back["storage"]["cu.lang"], "auto")
+        self.assertNotRegex(self.words(back), cjk)
 
     def test_the_tab_title_names_the_source(self):
         both = data(codex=CODEX)

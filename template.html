@@ -165,7 +165,7 @@
       <div class="tiles" id="tiles"></div>
       <div class="meta" id="meta"></div>
       <div class="heat"><div class="heat-grid" id="heat"></div></div>
-      <div class="legend">Less <span class="cell"></span><span class="cell l1"></span><span class="cell l2"></span><span class="cell l3"></span><span class="cell l4"></span> More</div>
+      <div class="legend"><span id="less">Less</span> <span class="cell"></span><span class="cell l1"></span><span class="cell l2"></span><span class="cell l3"></span><span class="cell l4"></span> <span id="more">More</span></div>
       <div class="split" id="split"></div>
       <div class="costline" id="costline"></div>
       <div class="fun" id="fun"></div>
@@ -188,18 +188,18 @@ const SOURCES = { claude: ALL.claude || !ALL.codex ? ALL : null, codex: ALL.code
 const TOOL = { claude: "Claude Code", codex: "Codex" };
 
 const BOOKS = [
-  ["The Little Prince", 22000],
-  ["Animal Farm", 39000],
-  ["The Great Gatsby", 62000],
-  ["Harry Potter and the Philosopher’s Stone", 103000],
-  ["The Hobbit", 123000],
-  ["1984", 123000],
-  ["Pride and Prejudice", 156000],
-  ["Dune", 244000],
-  ["Moby-Dick", 268000],
-  ["A Game of Thrones", 381000],
-  ["The Lord of the Rings", 576000],
-  ["War and Peace", 730000],
+  [{ en: "The Little Prince", zh: "小王子" }, 22000],
+  [{ en: "Animal Farm", zh: "动物农场" }, 39000],
+  [{ en: "The Great Gatsby", zh: "了不起的盖茨比" }, 62000],
+  [{ en: "Harry Potter and the Philosopher’s Stone", zh: "哈利·波特与魔法石" }, 103000],
+  [{ en: "The Hobbit", zh: "霍比特人" }, 123000],
+  [{ en: "1984", zh: "一九八四" }, 123000],
+  [{ en: "Pride and Prejudice", zh: "傲慢与偏见" }, 156000],
+  [{ en: "Dune", zh: "沙丘" }, 244000],
+  [{ en: "Moby-Dick", zh: "白鲸" }, 268000],
+  [{ en: "A Game of Thrones", zh: "权力的游戏" }, 381000],
+  [{ en: "The Lord of the Rings", zh: "魔戒" }, 576000],
+  [{ en: "War and Peace", zh: "战争与和平" }, 730000],
 ];
 const LUCK = Math.random();
 const PALETTES = {
@@ -246,7 +246,13 @@ const floorUsd = n => {
   return n < 10 ? "$" + cut(n, 0.01).toFixed(2) : n < 1000 ? "$" + cut(n, 1)
     : n < 1e6 ? "$" + cut(n / 1e3, 0.1).toFixed(1) + "k" : "$" + cut(n / 1e6, 0.1).toFixed(1) + "M";
 };
-const atLeast = (n, partial) => partial ? "≥ " + floorUsd(n) : usd(n);
+const atLeast = (n, partial) => partial ? "≥ " + P.money(n, true) : P.money(n);
+// Chinese reads dollars in full: "3,200 美元", cents under 10, rounded down for a floor.
+const zhMoney = (n, floor) => {
+  if (n > 0 && n < 0.01 && !floor) return "不到 0.01 美元";
+  const step = n < 10 ? 0.01 : 1, v = (floor ? Math.floor(n / step + 1e-9) : Math.round(n / step)) * step;
+  return v.toLocaleString("en-US", { minimumFractionDigits: n < 10 ? 2 : 0, maximumFractionDigits: n < 10 ? 2 : 0 }) + " 美元";
+};
 // A share that rounds to 100% while some of it was priced reads as ">99%".
 const share = f => f < 1 && f >= 0.995 ? ">99%" : (f * 100).toFixed(f < 0.1 ? 1 : 0) + "%";
 const PROVIDER = { claude: "Claude API", codex: "OpenAI API" };
@@ -282,7 +288,6 @@ function hourLabel(h) {
   return (h % 12 || 12) + " " + suffix;
 }
 
-const origin = () => `from this computer's ${TOOL[source]} history only`;
 let today, allDates, firstDay, RATIO, RANKED, hasPrices;
 
 function load() {
@@ -376,18 +381,20 @@ function tile(k, v) { return `<div class="tile"><div class="k">${k}</div><div cl
 
 function drawOverview(s) {
   document.getElementById("tiles").innerHTML =
-    tile("Sessions", group(s.sessions)) +
-    tile("Messages", group(s.msgs)) +
-    tile("Total tokens", fmt(s.total)) +
-    tile("Active days", range === "all" ? group(s.activeDays) : `${s.activeDays}/${s.span}`) +
-    tile("Peak hour", s.hasHours ? hourLabel(s.peak) : "—") +
-    tile("Favorite model", s.favorite);
-  const busy = s.busiest ? parse(s.busiest).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
+    tile(P.sessions, group(s.sessions)) +
+    tile(P.messages, group(s.msgs)) +
+    tile(P.total, P.amount(s.total)) +
+    tile(P.activeDays, range === "all" ? group(s.activeDays) : `${s.activeDays}/${s.span}`) +
+    tile(P.peakHour, s.hasHours ? P.hour(s.peak) : "—") +
+    tile(P.favorite, s.favorite);
+  const busy = s.busiest ? P.date(parse(s.busiest)) : "—";
   document.getElementById("meta").innerHTML =
-    tile("Longest streak", s.longest + (s.longest === 1 ? " day" : " days")) +
-    tile("Current streak", s.current + (s.current === 1 ? " day" : " days")) +
-    tile("Longest task", s.longestTask ? duration(s.longestTask) : "—") +
-    tile("Most active day", busy);
+    tile(P.longest, P.days(s.longest)) +
+    tile(P.current, P.days(s.current)) +
+    tile(P.task, s.longestTask ? P.duration(s.longestTask) : "—") +
+    tile(P.busiest, busy);
+  document.getElementById("less").textContent = P.less;
+  document.getElementById("more").textContent = P.more;
 
   const cut = quartiles(allDates.map(k => DATA.days[k].m));
   const weeks = 26;
@@ -402,36 +409,31 @@ function drawOverview(s) {
     const out = d > today ? " out" : "";
     const dim = (k < w.startKey && n) ? ' style="opacity:.35"' : "";
     const spent = priced() && DATA.days[k] && DATA.days[k].c ? sum(Object.values(DATA.days[k].c)) : 0;
-    const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " — " + group(n) +
+    const label = P.date(d) + " — " + group(n) +
       (spent ? " · " + atLeast(spent, DATA.days[k].u > 0) : "");
     cells += `<div class="cell ${lvl}${out}"${out ? "" : ` data-tip="${label}"`}${dim}></div>`;
   }
   document.getElementById("heat").innerHTML = cells;
 
-  document.getElementById("split").textContent = (s.estimated ? "≈ " : "") +
-    `Input ${fmt(s.tok[0])} · Output ${fmt(s.tok[1])} · Cache read ${fmt(s.tok[3])} · Cache write ${fmt(s.tok[2])}`;
+  document.getElementById("split").textContent = (s.estimated ? "≈ " : "") + P.split(s.tok.map(P.amount));
   const line = document.getElementById("costline");
   line.hidden = !priced();
   if (priced()) {
     const c = s.cost, left = c.tokens ? c.unpriced / c.tokens : 0;
-    const when = ALL.pricing.reviewed ? parse(ALL.pricing.reviewed).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
+    const when = ALL.pricing.reviewed ? P.reviewed(parse(ALL.pricing.reviewed)) : "";
     // With nothing priced at all, $0.00 would read as free.
-    line.innerHTML = (c.dollars || !c.unpriced ? `≈ <b>${usd(c.dollars)}</b>` : `<b>No estimate</b>`) + ` at ${PROVIDER[source]} list prices` +
-      (left >= 0.0005 ? ` · ${share(left)} of tokens not priced` : left > 0 ? " · <0.1% of tokens not priced" : "");
-    const until = partlyEstimated(s), partial = !!until;
-    if (partial) line.innerHTML += ` · history through ${until} partly estimated`;
-    line.dataset.tip = `What this usage would cost through the ${PROVIDER[source]} at list prices` +
-      (when ? ` (reviewed ${when})` : "") + `. A subscription is billed separately.` +
-      (left > 0 ? " Not priced: models without a listed price and history kept only as totals." : "") +
-      (partial ? ` Days through ${until} are priced from the transcripts still on this computer, which may not cover all of that usage.` : "");
+    line.innerHTML = P.priceLine(c.dollars || !c.unpriced ? P.money(c.dollars) : "", PROVIDER[source]) +
+      (left >= 0.0005 ? P.unpriced(share(left)) : left > 0 ? P.unpriced("<0.1%") : "");
+    const until = partlyEstimated(s);
+    if (until) line.innerHTML += P.partly(until);
+    line.dataset.tip = P.priceTip(PROVIDER[source], when, left > 0, until);
   }
   const spent = s.tok[0] + s.tok[1];
   const books = BOOKS.filter(b => spent >= b[1]);
   const book = books[Math.floor(LUCK * books.length)];
   const times = book ? Math.floor(spent / book[1]) : 0;
   document.getElementById("fun").textContent = !book ? ""
-    : times >= 2 ? `You’ve used ~${group(times)}× more tokens than ${book[0]}.`
-    : `You’ve used about as many tokens as ${book[0]}.`;
+    : times >= 2 ? P.times(times, P.book(book[0])) : P.same(P.book(book[0]));
 }
 
 function drawModels(s) {
@@ -460,7 +462,8 @@ function drawModels(s) {
     partly[k] = part;
     return out;
   });
-  const max = Math.max(1, ...perDay.map(o => sum(Object.values(o))));
+  const peak = Math.max(0, ...perDay.map(o => sum(Object.values(o))));
+  const max = Math.max(1, peak);  // the bars' scale; the label says the real peak
   const avail = document.getElementById("chart").clientWidth || 780;
   const slot = Math.max(2, Math.min(20, Math.floor(avail / days.length)));
   const gap = slot > 6 ? 2 : 1, bw = slot - gap, H = 160;
@@ -478,22 +481,22 @@ function drawModels(s) {
     const used = names.filter(n => o[n]);
     if (used.length) {
       const paid = dollars[days[i]];
-      const text = [shortDate(parse(days[i])), ...used.map(n => `${esc(n)}: ${fmt(o[n])}` + (paid[n] ? ` · ${atLeast(paid[n], partly[days[i]][n])}` : ""))].join("&#10;");
+      const text = [P.date(parse(days[i])), ...used.map(n => P.tip(esc(n), P.amount(o[n])) + (paid[n] ? ` · ${atLeast(paid[n], partly[days[i]][n])}` : ""))].join("&#10;");
       bars += `<rect x="${i * slot}" y="0" width="${slot}" height="${H}" fill="transparent" data-tip="${text}"/>`;
     }
   });
-  const first = parse(days[0]).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const first = P.date(parse(days[0]));
   document.getElementById("chart").innerHTML =
-    `<svg width="${W}" height="${H + 18}" role="img" aria-label="Tokens per day by model">${bars}` +
+    `<svg width="${W}" height="${H + 18}" role="img" aria-label="${P.chart}">${bars}` +
     `<line x1="0" y1="${H + 0.5}" x2="${W}" y2="${H + 0.5}" style="stroke:var(--line)"/>` +
     `<text x="0" y="${H + 14}" font-size="11" style="fill:var(--muted)">${first}</text>` +
-    `<text x="${W}" y="${H + 14}" font-size="11" style="fill:var(--muted)" text-anchor="end">Today · peak ${fmt(max)}/day</text></svg>`;
+    `<text x="${W}" y="${H + 14}" font-size="11" style="fill:var(--muted)" text-anchor="end">${P.today(P.amount(peak))}</text></svg>`;
 
   const total = s.total || 1;
   const until = priced() && partlyEstimated(s);
   const notes = [
-    ...(s.estimated ? ["Input / output / cache columns are estimated for days whose history only kept a per-model total."] : []),
-    ...(until ? [`API cost through ${until} comes from the transcripts still on this computer and may miss some usage.`] : []),
+    ...(s.estimated ? [P.splitNote] : []),
+    ...(until ? [P.costNote(until)] : []),
   ];
   // A search fee can come from a model with no tokens in the range: it still gets a row.
   const tokensOf = n => s.models[n] ? sum(s.models[n]) : 0;
@@ -502,15 +505,15 @@ function drawModels(s) {
     .sort((a, b) => tokensOf(b) - tokensOf(a));
   document.getElementById("mtable").innerHTML =
     (notes.length ? `<caption style="caption-side:bottom;text-align:left;color:var(--muted);font-size:12px;padding-top:8px">${notes.join(" ")}</caption>` : "") +
-    `<tr><th>Model</th><th>Tokens</th><th>Share</th><th>Input</th><th>Output</th><th>Cache write</th><th>Cache read</th>` +
-    (priced() ? `<th data-tip="At ${PROVIDER[source]} list prices; a subscription is billed separately">API cost</th>` : "") + `</tr>` +
+    `<tr>${P.heads.map(h => `<th>${h}</th>`).join("")}` +
+    (priced() ? `<th data-tip="${P.apiTip(PROVIDER[source])}">${P.apiCost}</th>` : "") + `</tr>` +
     rows.map(n => {
       const c = s.models[n] || [0, 0, 0, 0], paid = s.cost.byModel[n], partial = s.cost.partial[n];
       // Some of this model's tokens had no price: what is shown is a floor, not the cost.
-      const spent = partial ? `<td data-tip="Some of this model's tokens couldn't be priced, so this is a floor">${paid ? atLeast(paid, true) : "not priced"}</td>`
-                            : `<td>${paid ? usd(paid) : "—"}</td>`;
-      return `<tr><td><span class="swatch" style="background:${color[n] || "var(--muted)"}"></span>${esc(n)}</td><td>${fmt(sum(c))}</td>` +
-        `<td>${(sum(c) / total * 100).toFixed(1)}%</td><td>${fmt(c[0])}</td><td>${fmt(c[1])}</td><td>${fmt(c[2])}</td><td>${fmt(c[3])}</td>` +
+      const spent = partial ? `<td data-tip="${esc(P.floorTip)}">${paid ? atLeast(paid, true) : P.notPriced}</td>`
+                            : `<td>${paid ? P.money(paid) : "—"}</td>`;
+      return `<tr><td><span class="swatch" style="background:${color[n] || "var(--muted)"}"></span>${esc(n)}</td><td>${P.amount(sum(c))}</td>` +
+        `<td>${(sum(c) / total * 100).toFixed(1)}%</td><td>${P.amount(c[0])}</td><td>${P.amount(c[1])}</td><td>${P.amount(c[2])}</td><td>${P.amount(c[3])}</td>` +
         (priced() ? spent : "") + `</tr>`;
     }).join("");
 }
@@ -520,7 +523,7 @@ const priced = () => showCost && hasPrices;
 // The last day of Claude Code history priced only from the transcripts that survive, if the range reaches it.
 function partlyEstimated(s) {
   const before = source === "claude" && ALL.pricing && ALL.pricing.partialBefore;
-  return before && s.keys.some(k => k <= before) ? parse(before).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+  return before && s.keys.some(k => k <= before) ? P.date(parse(before)) : "";
 }
 const dayTokens = k => DATA.days[k] ? sum(Object.values(DATA.days[k].tm)) : 0;
 const active = k => !!DATA.days[k] && DATA.days[k].m + dayTokens(k) > 0;
@@ -540,8 +543,7 @@ function streaks() {
 
 const shortDate = d => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-// The Classic view stays in English like the original card. Profile follows the system language
-// unless the language button picks English or Chinese.
+// Both views follow the system language unless the language button picks English or Chinese.
 const SYSTEM_ZH = /^zh/i.test(navigator.language || "");
 const LANGS = { auto: "🌐\ufe0e ", en: "🌐\ufe0e English", zh: "🌐\ufe0e 中文" };
 const EN = {
@@ -551,11 +553,35 @@ const EN = {
   date: shortDate, month: d => d.toLocaleDateString("en-US", { month: "short" }),
   week: s => `Week of ${s}`, through: s => `Through ${s}`,
   duration, amount: fmt,
-  updated: s => `Updated ${s} · ${origin()}`,
+  updated: s => `Updated ${s} · ${EN.origin()}`,
   stamp: d => d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
   looks: LOOKS, styles: { card: "Classic", profile: "Profile" }, auto: "Auto",
   says: (what, now) => `${what}: ${now}, click to change`, language: "Language", appearance: "Appearance",
   tip: (a, b) => `${a}: ${b}`, lang: "en", title: () => `${TOOL[source]} Usage`,
+  // Classic
+  heading: () => `${TOOL[source]} usage`, overview: "Overview", models: "Models",
+  ranges: { all: "All", 30: "30d", 7: "7d" }, themes: { orange: "Orange", blue: "Blue" },
+  cost: "$ API cost", costLabel: "API cost estimate", less: "Less", more: "More",
+  sessions: "Sessions", messages: "Messages", activeDays: "Active days", peakHour: "Peak hour",
+  favorite: "Favorite model", busiest: "Most active day", hour: hourLabel,
+  money: (n, floor) => floor ? floorUsd(n) : usd(n),
+  split: t => `Input ${t[0]} · Output ${t[1]} · Cache read ${t[3]} · Cache write ${t[2]}`,
+  priceLine: (v, api) => `${v ? `≈ <b>${v}</b>` : "<b>No estimate</b>"} at ${api} list prices`,
+  unpriced: p => ` · ${p} of tokens not priced`, partly: d => ` · history through ${d} partly estimated`,
+  priceTip: (api, when, left, until) => `What this usage would cost through the ${api} at list prices` +
+    (when ? ` (reviewed ${when})` : "") + `. A subscription is billed separately.` +
+    (left ? " Not priced: models without a listed price and history kept only as totals." : "") +
+    (until ? ` Days through ${until} are priced from the transcripts still on this computer, which may not cover all of that usage.` : ""),
+  reviewed: d => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+  book: b => b.en, times: (n, b) => `You’ve used ~${group(n)}× more tokens than ${b}.`,
+  same: b => `You’ve used about as many tokens as ${b}.`,
+  chart: "Tokens per day by model", today: v => `Today · peak ${v}/day`,
+  heads: ["Model", "Tokens", "Share", "Input", "Output", "Cache write", "Cache read"], apiCost: "API cost",
+  apiTip: api => `At ${api} list prices; a subscription is billed separately`,
+  splitNote: "Input / output / cache columns are estimated for days whose history only kept a per-model total.",
+  costNote: d => `API cost through ${d} comes from the transcripts still on this computer and may miss some usage.`,
+  floorTip: "Some of this model's tokens couldn't be priced, so this is a floor", notPriced: "not priced",
+  origin: () => `from this computer's ${TOOL[source]} history only`,
 };
 const ZH = {
   total: "累计 Token 数", peak: "Token 单日峰值", task: "最长任务用时", longest: "最长连续天数", current: "当前连续天数",
@@ -568,13 +594,36 @@ const ZH = {
     return mins ? (h ? h + " 小时 " : "") + mins % 60 + " 分" : "不到 1 分";
   },
   amount: n => n >= 1e8 ? (n / 1e8).toFixed(1) + "亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + "万" : String(Math.round(n)),
-  updated: s => `更新于 ${s} · 仅统计这台电脑的 ${TOOL[source]} 记录`,
+  updated: s => `更新于 ${s} · ${ZH.origin()}`,
   stamp: d => `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
   looks: { auto: "◐ 自动", light: "☀︎ 浅色", dark: "☾ 深色" }, styles: { card: "经典", profile: "个人主页" }, auto: "自动",
   says: (what, now) => `${what}：${now}，点击切换`, language: "语言", appearance: "外观",
   tip: (a, b) => `${a}：${b}`, lang: "zh-CN", title: () => `${TOOL[source]} 用量`,
+  // Classic
+  heading: () => `${TOOL[source]} 用量`, overview: "总览", models: "模型",
+  ranges: { all: "全部", 30: "30 天", 7: "7 天" }, themes: { orange: "橙色", blue: "蓝色" },
+  cost: "$ API 费用", costLabel: "API 费用估算", less: "少", more: "多",
+  sessions: "会话", messages: "消息", activeDays: "活跃天数", peakHour: "最活跃时段",
+  favorite: "最常用的模型", busiest: "最活跃的一天", hour: h => `${h} 点`, money: zhMoney,
+  split: t => `输入 ${t[0]} · 输出 ${t[1]} · 缓存读取 ${t[3]} · 缓存写入 ${t[2]}`,
+  priceLine: (v, api) => `按 ${api} 标价估算，${v ? `约 <b>${v}</b>` : "<b>无法估算</b>"}`,
+  unpriced: p => ` · 有 ${p} 的 Token 未计入费用估算`, partly: d => ` · 截至 ${d} 的历史为部分估算`,
+  priceTip: (api, when, left, until) => `按 ${api} 标价估算这些用量的费用` +
+    (when ? `（上次核价日期：${when}）` : "") + `。订阅另行计费。` +
+    (left ? "部分用量缺少适用价格或计费明细，未计入估算。" : "") +
+    (until ? `截至 ${until} 的费用仅根据本机留存的对话记录估算，可能遗漏部分用量。` : ""),
+  reviewed: d => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`,
+  book: b => b.zh, times: (n, b) => `只算输入和输出，用量约相当于 ${group(n)} 本《${b}》的篇幅。`,
+  same: b => `只算输入和输出，用量和一本《${b}》的篇幅差不多。`,
+  chart: "每天各模型的 Token 用量", today: v => `今天 · 单日峰值 ${v}`,
+  heads: ["模型", "Token", "占比", "输入", "输出", "缓存写入", "缓存读取"], apiCost: "API 费用",
+  apiTip: api => `按 ${api} 标价计算；订阅另行计费`,
+  splitNote: "部分日期只保留了各模型的 Token 总数，这些日期的输入、输出和缓存用量均为估算值。",
+  costNote: d => `截至 ${d} 的费用仅根据本机留存的对话记录估算，可能遗漏部分用量。`,
+  floorTip: "仅计入可估价的部分，实际费用可能更高。", notPriced: "未计价",
+  origin: () => `仅统计这台电脑的 ${TOOL[source]} 记录`,
 };
-let P = EN;  // the Profile words; draw() picks them
+let P = EN;  // the page's words; draw() picks them
 
 function drawProfile() {
   const name = ALL.user || "you";
@@ -623,30 +672,31 @@ function drawProfile() {
 
 function draw() {
   const isProfile = style === "profile";
-  document.getElementById("title").textContent = `${TOOL[source]} usage`;
+  P = language === "zh" || language === "auto" && SYSTEM_ZH ? ZH : EN;
+  document.getElementById("title").textContent = P.heading();
   document.getElementById("sources").hidden = !(SOURCES.claude && SOURCES.codex);
   document.querySelectorAll("#sources button").forEach(b => b.setAttribute("aria-pressed", b.dataset.source === source));
   document.documentElement.classList.toggle("profile", isProfile);
   document.documentElement.classList.toggle("blue", theme === "blue" && !isProfile);
   document.documentElement.classList.toggle("dark", isDark() && !isProfile);
-  // Each view keeps to one language: Classic stays English; Profile uses the picked language.
-  P = language === "zh" || language === "auto" && SYSTEM_ZH ? ZH : EN;
-  const words = isProfile ? P : EN;
-  document.getElementById("langseg").hidden = !isProfile;
+  // One language for the whole page, the language button's, shown in both views.
   const langButton = document.getElementById("language");
-  langButton.textContent = isProfile ? LANGS[language] + (language === "auto" ? P.auto : "") : "";
+  langButton.textContent = LANGS[language] + (language === "auto" ? P.auto : "");
   langButton.setAttribute("aria-label", P.says(P.language, language === "auto" ? P.auto : LANGS[language].replace(/^\S+\s+/, "")));
-  document.documentElement.lang = words.lang;
-  document.title = words.title();
+  document.documentElement.lang = P.lang;
+  document.title = P.title();
   const lookButton = document.getElementById("appearance");
-  lookButton.textContent = words.looks[appearance];
-  lookButton.setAttribute("aria-label", words.says(words.appearance, words.looks[appearance].replace(/^\S+\s+/, "")));
-  for (const key of ["card", "profile"]) document.querySelector(`[data-style=${key}]`).textContent = words.styles[key];
+  lookButton.textContent = P.looks[appearance];
+  lookButton.setAttribute("aria-label", P.says(P.appearance, P.looks[appearance].replace(/^\S+\s+/, "")));
+  for (const key of ["card", "profile"]) document.querySelector(`[data-style=${key}]`).textContent = P.styles[key];
   document.documentElement.classList.toggle("light", !isDark() && isProfile);
   document.getElementById("themes").hidden = isProfile;
   document.getElementById("costseg").hidden = isProfile || !hasPrices;
   document.getElementById("costbtn").setAttribute("aria-pressed", showCost);
-  document.querySelectorAll("#themes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.theme === theme));
+  document.querySelectorAll("#themes button").forEach(b => { b.textContent = P.themes[b.dataset.theme]; b.setAttribute("aria-pressed", b.dataset.theme === theme); });
+  const costButton = document.getElementById("costbtn");
+  costButton.textContent = P.cost;
+  costButton.setAttribute("aria-label", P.costLabel);
   document.getElementById("profile").hidden = !isProfile;
   document.getElementById("cardview").hidden = isProfile;
   document.getElementById("title").hidden = isProfile;
@@ -658,14 +708,13 @@ function draw() {
     document.getElementById("pfoot").textContent = P.updated(P.stamp(new Date(ALL.generatedAt)));
     return;
   }
-  document.querySelectorAll("#tabs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.tab === tab));
-  document.querySelectorAll("#ranges button").forEach(b => b.setAttribute("aria-pressed", b.dataset.range === range));
+  document.querySelectorAll("#tabs button").forEach(b => { b.textContent = P[b.dataset.tab]; b.setAttribute("aria-pressed", b.dataset.tab === tab); });
+  document.querySelectorAll("#ranges button").forEach(b => { b.textContent = P.ranges[b.dataset.range]; b.setAttribute("aria-pressed", b.dataset.range === range); });
   document.getElementById("overview").hidden = tab !== "overview";
   document.getElementById("models").hidden = tab !== "models";
   const s = compute();
   if (tab === "overview") drawOverview(s); else drawModels(s);
-  const when = new Date(ALL.generatedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  document.getElementById("foot").textContent = `Updated ${when} · ${origin()}`;
+  document.getElementById("foot").textContent = P.updated(P.stamp(new Date(ALL.generatedAt)));
 }
 
 [["styles", "style", v => style = v], ["sources", "source", v => { source = v; load(); try { history.replaceState(null, "", location.pathname); } catch {} }], ["themes", "theme", v => theme = v],

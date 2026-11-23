@@ -31,12 +31,19 @@ function buttons(selector) {
   const box = /^#(\w+) button$/.exec(selector);
   if (!box) return [];
   const body = new RegExp(`id="${box[1]}"[^>]*>([\\s\\S]*?)</div>`).exec(input.html)[1];
-  return [...body.matchAll(/data-(\w+)="([^"]+)"/g)].map(([, key, value]) => ({
-    dataset: { [key]: value },
-    setAttribute(name, on) { pressed[box[1]] = { ...pressed[box[1]], [value]: on }; },
-  }));
+  // The same stand-ins querySelector hands out, so what the script writes into them is seen.
+  return [...body.matchAll(/data-(\w+)="([^"]+)"/g)].map(([, key, value]) => {
+    const el = document.querySelector(`[data-${key}=${value}]`);
+    el.dataset = { [key]: value };
+    el.setAttribute = (name, on) => {
+      el.attrs[name] = String(on);
+      if (name === "aria-pressed") pressed[box[1]] = { ...pressed[box[1]], [value]: on };
+    };
+    return el;
+  });
 }
 
+const document = {};
 const sandbox = {
   console,
   innerWidth: 1000,
@@ -49,7 +56,7 @@ const sandbox = {
   setTimeout,
   clearTimeout,
   localStorage: { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v) },
-  document: {
+  document: Object.assign(document, {
     documentElement: root,
     addEventListener() {},
     getElementById: byId,
@@ -62,7 +69,7 @@ const sandbox = {
       return el;
     },
     querySelectorAll: selector => buttons(selector),
-  },
+  }),
 };
 
 vm.createContext(sandbox);
