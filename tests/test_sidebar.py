@@ -63,7 +63,9 @@ class VersionTests(unittest.TestCase):
         lock = json.loads((ROOT / "sidebar" / "version.lock.json").read_text(encoding="utf-8"))
         shipped = hashlib.sha256()
         for name in ("manifest.json", "icon.png", "server/index.js"):
-            shipped.update((ROOT / "sidebar" / name).read_bytes())
+            raw = (ROOT / "sidebar" / name).read_bytes()
+            # Git on Windows may check text files out with CRLF line ends: the same file either way.
+            shipped.update(raw if name.endswith(".png") else raw.replace(b"\r\n", b"\n"))
         if shipped.hexdigest() != lock["sha256"]:
             self.assertNotEqual(manifest["version"], lock["version"],
                                 "the extension changed: raise its version in manifest.json and server/index.js")
