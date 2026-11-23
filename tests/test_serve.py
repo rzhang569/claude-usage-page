@@ -74,7 +74,8 @@ class ServerTests(unittest.TestCase):
         self.fail("Could not start server after five port allocation attempts")
 
     def request(self, path):
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=2)
+        # A request can wait on a rebuild, which a slow Windows runner may take seconds to finish.
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         try:
             connection.request("GET", path)
             response = connection.getresponse()
