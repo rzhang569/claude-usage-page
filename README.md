@@ -46,6 +46,8 @@ The page reads everything locally and sends nothing anywhere. (The optional side
 
 Token totals for older days can therefore be lower than `claude /stats`. Two more differences: `stats-cache.json` splits days in UTC, so those older days change at UTC midnight while newer days use your local time; and days known only from its totals have no input / output / cache split, so theirs is estimated from each model's overall mix (marked with ≈).
 
+"Your local time" is your computer's time zone when the page is built. If you travel across time zones, the boundaries between days move with you: an hour of usage near midnight can move to the neighboring day, so a day's total or the peak day can change, while the overall totals stay the same. Back in your usual time zone, the days are as before.
+
 ### Codex
 
 A switch at the top shows Codex in the same views. OpenAI's own Codex page adds up all your devices in the cloud; this one shows only what this computer holds, so the two can differ.
